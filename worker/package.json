@@ -1,0 +1,24 @@
+{
+  "name": "tw-ubn-lookup",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241022.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0",
+    "wrangler": "^3.80.0"
+  },
+  "cloudflare": {
+    "bindings": {
+      "UBN_BUCKET": {
+        "description": "R2 bucket with the published shards. Optional — if empty, the Worker falls back to the official FIA per-record API."
+      }
+    }
+  }
+}

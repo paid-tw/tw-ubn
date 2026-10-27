@@ -1,0 +1,18 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tw-ubn-lookup",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "observability": { "enabled": true },
+  "vars": {
+    "ALLOWED_ORIGINS": "*",
+    "SHARDS": "8192",
+    "CACHE_TTL": "86400"
+  },
+  "r2_buckets": [
+    // Default bucket name so the Deploy to Cloudflare flow can provision it.
+    // The Worker works even while this bucket is empty: it falls back to the
+    // official FIA per-record API (and caches the result at the edge).
+    { "binding": "UBN_BUCKET", "bucket_name": "tw-ubn" }
+  ]
+}
