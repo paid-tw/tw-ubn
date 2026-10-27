@@ -9,16 +9,18 @@
 //!   ubn.ndjson.gz    full dataset, one JSON object per line
 //!   ubn.sqlite       full dataset, indexed on ban
 //!   shards/<n>.json  per-UBN shards (ban -> {name,address,useInvoice,status})
-//!   manifest.json    data date, row count, shard count, hash, license
+//!   manifest.json    data date, row count, shard count, hash, OGDL attribution
 //!
 //! Usage:
 //!   ubn-build [--out DIR] [--shards N]
 //!             [--active-zip PATH] [--suspended-csv PATH] [--no-suspended]
 //! When the local paths are omitted the files are fetched over HTTPS.
 
+mod attribution;
 mod transform;
 
 use anyhow::{bail, Context, Result};
+use attribution::{IncludedSource, ACTIVE_URL, SUSPENDED_URL};
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use rusqlite::{params, Connection};
@@ -28,9 +30,6 @@ use std::io::{BufWriter, Read, Write};
 use std::path::PathBuf;
 use transform::{parse_csv, Record, ShardRecord, Status};
 use ubn_core::shard_of;
-
-const ACTIVE_URL: &str = "https://eip.fia.gov.tw/data/BGMOPEN1.zip";
-const SUSPENDED_URL: &str = "https://eip.fia.gov.tw/data/BGMOPEN1X.csv";
 
 struct Args {
     out: PathBuf,
@@ -176,8 +175,8 @@ fn main() -> Result<()> {
         .context("parsing active registry (BGMOPEN1)")?;
     let data_date = active.data_date.clone();
 
-    let suspended_records = if args.no_suspended {
-        Vec::new()
+    let (suspended_records, suspended_date) = if args.no_suspended {
+        (Vec::new(), None)
     } else {
         eprintln!("==> loading suspended tax registry");
         let csv = match &args.suspended_csv {
@@ -191,7 +190,7 @@ fn main() -> Result<()> {
             suspended.records.len(),
             suspended.data_date
         );
-        suspended.records
+        (suspended.records, suspended.data_date)
     };
     let records = merge_records(suspended_records, active.records);
     eprintln!("==> {} records (data date {:?})", records.len(), data_date);
@@ -203,16 +202,18 @@ fn main() -> Result<()> {
     eprintln!("==> writing ubn.sqlite");
     write_sqlite(&records, &args.out.join("ubn.sqlite"))?;
 
-    let manifest = serde_json::json!({
-        "source": ACTIVE_URL,
-        "sourceAgency": "財政部財政資訊中心 (Fiscal Information Agency, Ministry of Finance)",
-        "dataDate": data_date,
-        "builtAt": chrono_now(),
-        "rows": records.len(),
-        "shards": args.shards,
-        "hash": "fnv1a-32",
-        "license": "政府資料開放授權條款-第1版 (Open Government Data License v1.0)",
-    });
+    let suspended = if args.no_suspended {
+        IncludedSource::Skipped
+    } else {
+        IncludedSource::Loaded(suspended_date.as_deref())
+    };
+    let manifest = attribution::build_manifest(
+        data_date.as_deref(),
+        suspended,
+        records.len(),
+        args.shards,
+        &chrono_now(),
+    );
     fs::write(
         args.out.join("manifest.json"),
         serde_json::to_string_pretty(&manifest)?,
