@@ -39,10 +39,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           tar -czf dist/shards.tar.gz -C dist shards
+          # 顯名聲明 from the Rust manifest (attribution.exhibit / statement / licenseUrl).
+          # Omitting it means the Open Government Data License was not granted.
+          jq -r '
+            .attribution.exhibit,
+            "",
+            .attribution.statement,
+            "",
+            ("政府資料開放授權條款：" + .attribution.licenseUrl),
+            "",
+            ("FIA tax registry snapshot " + (.dataDate // "unknown") + ". rows=" + (.rows | tostring) + ".")
+          ' dist/manifest.json > dist/release-notes.md
           gh release create "${{ steps.m.outputs.tag }}" \
             dist/ubn.ndjson.gz dist/ubn.sqlite dist/shards.tar.gz dist/manifest.json \
             --title "Dataset ${{ steps.m.outputs.date }}" \
-            --notes "FIA tax registry snapshot ${{ steps.m.outputs.date }}. Open Government Data License v1.0." \
+            --notes-file dist/release-notes.md \
           || gh release upload "${{ steps.m.outputs.tag }}" \
             dist/ubn.ndjson.gz dist/ubn.sqlite dist/shards.tar.gz dist/manifest.json --clobber
 

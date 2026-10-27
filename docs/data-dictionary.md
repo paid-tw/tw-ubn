@@ -37,9 +37,11 @@ covers name / invoice flag / industry / address / status. GCIS responsible-perso
 enrichment is a possible **phase 3** (concatenate the monthly 設立 registers), not
 required for the checkout title lookup.
 
-Both government sources are released under the **Open Government Data License
-v1.0 (政府資料開放授權條款-第1版)**: redistribution is permitted with attribution
-of the source and extraction date.
+Both government sources are released by their providers under the
+**政府資料開放授權條款－第1版** (Open Government Data License v1,
+<https://data.gov.tw/license>). The FIA bulk files this repository republishes
+must carry the 顯名聲明 described under [Licence](#licence). Omitting it means
+the licence was not granted.
 
 ## FIA tax-registry columns (BGMOPEN1.csv)
 
@@ -99,6 +101,27 @@ omit it; clients must treat a missing `status` as unknown, not as active.
 Adding the field is backward compatible for readers that ignore unknown JSON
 keys. `suspension_date` is not copied onto shards; it is only on
 `ubn.ndjson.gz` and `ubn.sqlite`.
+
+## Licence
+
+`manifest.json` (written by `ubn-build`) is the per-build copy of the
+Open Government Data License exhibit. `attribution` contains:
+
+1. `exhibit` — 提供機關／單位, year, and dataset name plus version. The
+   version is the CSV sentinel date (for example `28-OCT-26`); these files
+   are replaced daily and have no separate version number. `dataDate` is the
+   active file's sentinel; `suspendedDataDate` is the suspended file's.
+2. `statement` — 「此開放資料依政府資料開放授權條款 (Open Government Data License) 進行公眾釋出，使用者於遵守本條款各項規定之前提下，得利用之。」
+3. `licenseUrl` — <https://data.gov.tw/license>
+
+| Dataset | Provider | Catalog | File |
+| --- | --- | --- | --- |
+| 全國營業(稅籍)登記資料集 | 財政部財政資訊中心 | <https://data.gov.tw/dataset/9400> | `BGMOPEN1.zip` |
+| 全國營業(稅籍)登記(停業)資料集 | 財政部財政資訊中心 | <https://data.gov.tw/dataset/75140> | `BGMOPEN1X.csv` |
+
+The dataset workflow turns `attribution.exhibit`, `attribution.statement`, and
+`attribution.licenseUrl` into the GitHub Release notes. `--no-suspended`
+drops the suspended dataset from the exhibit.
 
 ## UBN checksum
 

@@ -109,8 +109,20 @@ Rust core 與 TS 客戶端各自實作同樣的 ~3 個函式；共用的測試�
 
 ## 授權
 
-原始碼：MIT。資料產物：衍生自台灣政府開放資料，採**政府資料開放授權條款第 1 版**——
-再散布時請註明來源與擷取日期。見 [`LICENSE`](LICENSE)。
+原始碼：MIT。見 [`LICENSE`](LICENSE)。
+
+資料產物衍生自**財政部財政資訊中心**的開放資料，授權為**政府資料開放授權條款－第1版**
+（Open Government Data License v1，<https://data.gov.tw/license>）。未附上顯名聲明，
+視同自始未取得授權：
+
+- 提供機關／單位：財政部財政資訊中心
+- 資料集：全國營業(稅籍)登記資料集、全國營業(稅籍)登記(停業)資料集
+- 版本：各次建置的擷取日期，見該次 `manifest.json` 的 `dataDate` 與
+  `attribution.datasets[].version`
+
+此開放資料依政府資料開放授權條款 (Open Government Data License) 進行公眾釋出，使用者於遵守本條款各項規定之前提下，得利用之。
+
+政府資料開放授權條款：<https://data.gov.tw/license>
 
 ## 免責聲明
 

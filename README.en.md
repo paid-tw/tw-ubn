@@ -120,9 +120,21 @@ vectors (see `client/src/__tests__`) keep them from drifting.
 
 ## License
 
-Source code: MIT. Data artifacts: derived from Taiwan government open data under
-the Open Government Data License v1.0 — redistribute with source + date
-attribution. See [`LICENSE`](LICENSE).
+Source code: MIT. See [`LICENSE`](LICENSE).
+
+The data artifacts are derived from open data released by
+**財政部財政資訊中心** under **政府資料開放授權條款－第1版** (Open Government
+Data License v1, <https://data.gov.tw/license>). The licence's exhibit says
+that omitting the attribution means no licence was granted:
+
+- Provider (提供機關／單位): 財政部財政資訊中心
+- Datasets: 全國營業(稅籍)登記資料集 and 全國營業(稅籍)登記(停業)資料集
+- Version: the extract date of that build, in `manifest.json` as `dataDate`
+  and `attribution.datasets[].version`
+
+此開放資料依政府資料開放授權條款 (Open Government Data License) 進行公眾釋出，使用者於遵守本條款各項規定之前提下，得利用之。
+
+政府資料開放授權條款：<https://data.gov.tw/license>
 
 ## Disclaimer
 
