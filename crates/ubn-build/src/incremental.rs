@@ -108,6 +108,9 @@ fn values(r: &Record) -> String {
 }
 
 /// `CREATE TABLE IF NOT EXISTS` — a UBN primary key, so `ON CONFLICT(ban)` works.
+/// Also an index on `name` so the D1 variant's prefix search (`name LIKE 'x%'`)
+/// is index-assisted and reads few rows. The index costs one extra row_written
+/// per insert/name-change; harmless for the R2 path, which never creates D1.
 pub fn write_schema_sql(path: &Path) -> Result<()> {
     let mut w = BufWriter::new(File::create(path)?);
     writeln!(
@@ -115,7 +118,8 @@ pub fn write_schema_sql(path: &Path) -> Result<()> {
         "CREATE TABLE IF NOT EXISTS ubn (\n  \
          ban TEXT PRIMARY KEY, name TEXT, address TEXT, capital TEXT,\n  \
          setup_date TEXT, setup_date_iso TEXT, org_type TEXT,\n  \
-         use_invoice INTEGER, status TEXT, industries TEXT\n);"
+         use_invoice INTEGER, status TEXT, industries TEXT\n);\n\
+         CREATE INDEX IF NOT EXISTS idx_name ON ubn (name);"
     )?;
     Ok(())
 }

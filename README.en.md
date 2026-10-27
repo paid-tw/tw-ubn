@@ -3,7 +3,11 @@
 [![CI](https://github.com/paid-tw/tw-ubn/actions/workflows/ci.yml/badge.svg)](https://github.com/paid-tw/tw-ubn/actions/workflows/ci.yml)
 &nbsp;[繁體中文](README.md)
 
+Free tier (R2 shards, runs on Workers Free):
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/paid-tw/tw-ubn/tree/main/worker)
+
+Paid tier (D1, adds name search, needs Workers Paid):
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/paid-tw/tw-ubn/tree/main/worker-d1)
 
 An open, **daily-updated** dataset of Taiwan business registrations (統一編號 /
 UBN), plus a tiny client for the most common use case: **at checkout, the buyer
@@ -64,27 +68,36 @@ if (validateUBN(ban)) {
 The `validateUBN` checksum is verified against all ~1.7M active UBNs (100%); it
 uses the post-2023 rule, not the stale `% 10` one found in many snippets.
 
-## One-click lookup service (Cloudflare Worker)
+## One-click lookup service (two versions)
 
-Click the **Deploy to Cloudflare** button above to deploy `worker/` to your own
-Cloudflare account. It provisions an R2 bucket and gives you an endpoint:
+The two **Deploy to Cloudflare** buttons each deploy a self-contained Worker to
+your account:
+
+| | Free `worker/` | Paid `worker-d1/` |
+|---|---|---|
+| Backend | R2 shards + FIA fallback | D1 (SQLite) + FIA fallback |
+| Endpoints | `/v1/vat/:ban` | `/v1/vat/:ban` **+ `/v1/search?name=`** |
+| Plan | **Workers Free is enough** | **Workers Paid** (the 1.7M-row initial load exceeds Free's 100k writes/day) |
+| For | plain UBN → title autofill | you also need **name/company search** (D1's SQL edge) |
+
+Both: `/v1/vat/:ban` validates the checksum → serves from the dataset (edge
+cached) → else proxies the official FIA per-record API and caches it (government
+hit at most once per UBN per cache window). CORS defaults to `*` (set
+`ALLOWED_ORIGINS` for production); bindings are provisioned by the deploy flow,
+and until the data is loaded it falls back to FIA — run the
+[dataset workflow](.github/workflows/dataset.yml) to upgrade to "dataset first".
 
 ```
 GET https://<your-worker>/v1/vat/22099131
 → { "found": true, "ban": "22099131", "name": "台灣積體電路製造股份有限公司", "source": "dataset" }
+
+GET https://<your-worker-d1>/v1/search?name=台灣積體      # name prefix search, paid only
+→ { "query": "台灣積體", "count": 1, "results": [ … ] }
 ```
 
-- **R2 shards first**: served from the edge, never touching the government.
-- **Fallback on miss**: an empty bucket or a brand-new UBN proxies the official
-  FIA per-record API and caches it at the edge (government hit at most once per
-  UBN per cache window).
-- **CORS**: defaults to `*`; set an allowlist via `ALLOWED_ORIGINS` in
-  `wrangler.jsonc` for production.
-- After deploy, run the [dataset workflow](.github/workflows/dataset.yml) to fill
-  R2 and upgrade from "FIA fallback" to "dataset first".
-
-> Why R2 shards and not D1? Measured on a real Cloudflare account (latency /
-> cost / ingestion): [docs/bench-r2-vs-d1.md](docs/bench-r2-vs-d1.md).
+> Why R2 by default, not D1? Measured on a real Cloudflare account — for plain
+> point lookups R2 is cheaper: [docs/bench-r2-vs-d1.md](docs/bench-r2-vs-d1.md).
+> D1's value is the name search.
 
 ## Repository layout
 
@@ -92,7 +105,8 @@ GET https://<your-worker>/v1/vat/22099131
 crates/ubn-core    Rust: UBN checksum, FNV shard hash, ROC date (source of truth)
 crates/ubn-build   Rust: the build pipeline (a single binary, no external tools)
 client/            TypeScript: @paid-tw/ubn, the browser checkout client
-worker/            Cloudflare Worker: lookup service (R2 shards + FIA fallback), one-click deploy
+worker/            Cloudflare Worker (free): R2 shards + FIA fallback, one-click deploy
+worker-d1/         Cloudflare Worker (paid): D1 backend + name search, one-click deploy
 ```
 
 ## Building the dataset

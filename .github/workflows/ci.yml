@@ -37,9 +37,12 @@ jobs:
 
   worker:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        dir: [worker, worker-d1]
     defaults:
       run:
-        working-directory: worker
+        working-directory: ${{ matrix.dir }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
