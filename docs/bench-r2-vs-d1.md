@@ -46,20 +46,36 @@ read-replication is enabled. R2 fronted by the CDN caches at the edge globally.
 
 ## Ingestion (measured)
 
-Seeding 5,000 rows through the Worker: **31 s (APAC) / 11 s (ENAM)**. That is the
-decisive operational difference:
+Two very different D1 paths — don't confuse them:
 
-- **R2**: a rebuild rewrites 8,192 small objects — fast, flat, cheap.
-- **D1**: the FIA snapshot is a **full** daily dump (no diffs). Reloading all
-  ~1.7 M rows daily extrapolates to a very slow job and a large write volume
-  (see cost). Incremental upserts need diffing you'd have to build yourself.
+- **Per-row via the Worker `batch()`** (what seeded this bench): 5,000 rows in
+  **31 s (APAC) / 11 s (ENAM)** — ~50 API round-trips. This is NOT the right tool
+  for a build and should not be read as "D1 is slow to load".
+- **Bulk import** (`wrangler d1 execute <db> --remote --file=dump.sql`, which
+  uses D1's import endpoint): **200,000 rows in 29.6 s wall / 16.2 s server
+  (~12 k rows/s)**, measured. Extrapolated, the full ~1.7 M rows ≈ **~4 min**
+  (the `.sql` would be ~200 MB; D1's import has a size cap, so chunk it). You can
+  generate the dump straight from the pipeline's SQLite (`sqlite3 … .dump`).
+
+So D1 *build speed is fine*. The real D1 ingestion costs are two:
+
+1. **Writes are billed per row, and indexes multiply them.** The 200 k import
+   reported `rows_written: 400003` — **2× the inserts**, because of the single
+   `PRIMARY KEY` index. A full 1.7 M reload with one index ≈ **3.4 M writes/day**.
+2. **The FIA snapshot is a full dump (no diffs).** A daily *full* reload pays that
+   every day. The fix is an incremental upsert (diff today's snapshot against
+   yesterday's — cheap with the Rust pipeline) so you only write the delta
+   (~thousands/day), which makes D1 cost negligible but is code you must build.
+
+R2 sidesteps all of this: a rebuild just rewrites 8,192 small objects — flat,
+and writes don't multiply.
 
 ## Cost (Cloudflare list prices)
 
 | | R2 (shards + CDN) | D1 |
 |---|---|---|
 | Storage | $0.015/GB·mo → ~330 MB ≈ **$0.005/mo** | $0.75/GB·mo (5 GB free) |
-| Writes (rebuild) | Class A $4.50/M → 8,192/day ≈ **~$1/mo** | rows written **$1.00/M** → 1.7 M/day full reload ≈ **~$50/mo** |
+| Writes (rebuild) | Class A $4.50/M → 8,192/day ≈ **~$1/mo** | rows written **$1.00/M**, ×2 for the PK index → full 1.7 M reload ≈ 3.4 M/day ≈ **~$100/mo** (daily full); **incremental upsert** cuts this to ~cents |
 | Reads (lookups) | Class B $0.36/M, **and CDN-cached hits don't bill**; egress **free** | rows read $0.001/M (point lookup ≈ 1 row, cheap) |
 | Free-tier ceiling | generous | **100 k writes/day** → a 1.7 M full reload is impossible on free |
 
@@ -70,8 +86,9 @@ on raw query latency (colocated D1 is actually a touch faster), but on everythin
 around it:
 
 - **Ingestion**: rewrite 8 k files vs reload 1.7 M rows daily.
-- **Cost**: cents/month, egress-free, cache-served reads don't bill — vs ~$50/mo
-  of D1 writes for a daily full reload.
+- **Cost**: cents/month, egress-free, cache-served reads don't bill — vs ~$100/mo
+  of D1 writes for a daily *full* reload (halved-then-some only if you build
+  incremental upserts).
 - **Topology**: shards serve from the edge globally (even with **zero** compute —
   pure static R2+CDN, no Worker); D1 has one primary region.
 - In steady state both sit behind a cache and resolve in ~RTT, so latency is a
