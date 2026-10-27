@@ -9,8 +9,33 @@
 | **GCIS company registration** | Companies only (公司); legal name, status (核准/解散/撤銷), responsible person, capital | `https://data.gcis.nat.gov.tw/od/data/api/...` — JSON, **no CORS** (server-side only) | **Validation / enrichment** |
 
 The FIA bulk file (`BGMOPEN1`) covers **active** entities only; a suspended/closed
-set is published separately (`BGMOPEN1X`). Line 2 of the CSV is a sentinel row
-holding the extract date (e.g. `27-OCT-26`) and must be dropped.
+set is published separately (`BGMOPEN1X`, a plain CSV — there is no `.zip` for it).
+Line 2 of the CSV is a sentinel row holding the extract date (e.g. `27-OCT-26`)
+and must be dropped.
+
+### Is there a GCIS bulk master? (investigated 2026-10-27)
+
+No usable one. GCIS (經濟部商業發展署) exposes company data three ways, none a
+maintained full dump:
+
+- **Per-record API** (`/od/data/api/{resource}`): requires a `$filter`; with no
+  filter it returns `此API不存在` / `$filter參數有誤`, so you cannot page the whole
+  set. It is query-by-UBN only. Used here for per-record enrichment.
+- **`reportCity.jsp`**: monthly **PDF** bulletins per city (`…Asetup/change/rest…pdf`)
+  — unstructured deltas, not usable as data.
+- **商業設立登記清冊(月份)** (data.gov.tw/dataset/6668): downloadable **monthly
+  CSVs** (`/od/file?oid=…`, UTF-8 with BOM) with columns 序號, 縣市名稱, 統一編號,
+  商業名稱, 商業所在地, 資本額, 組織型態, **負責人**, 設立日期, 核准文號. These are the
+  real downloadable files and carry the responsible person — but they are
+  **setup-event increments** (new registrations that month; ~3–4k rows/file;
+  no later name changes or closures), cover **商業 (sole-prop/partnership) only**
+  (companies are a parallel dataset), and start 2013-10. A full 統編→負責人 map
+  would mean concatenating ~156 files and de-duplicating by UBN.
+
+**Decision:** FIA (`BGMOPEN1` + `BGMOPEN1X`) is the bulk source and already
+covers name / invoice flag / industry / address / status. GCIS responsible-person
+enrichment is a possible **phase 3** (concatenate the monthly 設立 registers), not
+required for the checkout title lookup.
 
 Both government sources are released under the **Open Government Data License
 v1.0 (政府資料開放授權條款-第1版)**: redistribution is permitted with attribution
