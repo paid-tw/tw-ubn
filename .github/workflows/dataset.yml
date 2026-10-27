@@ -18,19 +18,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
 
-      - name: Install DuckDB CLI
-        run: |
-          curl -sSL -o /tmp/duckdb.zip \
-            https://github.com/duckdb/duckdb/releases/download/v1.3.2/duckdb_cli-linux-amd64.zip
-          unzip -o /tmp/duckdb.zip -d /usr/local/bin
-          duckdb --version
+      - name: Build pipeline
+        run: cargo build --release -p ubn-build
 
-      - name: Build dataset
-        run: bash pipeline/build.sh
+      - name: Run pipeline
+        run: ./target/release/ubn-build --out dist --shards 8192
 
       - name: Read manifest
         id: m
@@ -65,13 +60,11 @@ jobs:
           export AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
           EP="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
           V="v/$(date +%Y%m%d)"
-          # versioned, immutable
           aws s3 sync dist/shards "s3://$R2_BUCKET/$V/shards" \
             --endpoint-url "$EP" --checksum-algorithm CRC32 \
             --content-type application/json --cache-control 'public, max-age=31536000, immutable'
           aws s3 cp dist/manifest.json "s3://$R2_BUCKET/$V/manifest.json" \
             --endpoint-url "$EP" --content-type application/json
-          # short-TTL pointer to the current version
           printf '{"latest":"%s"}' "$V" > latest.json
           aws s3 cp latest.json "s3://$R2_BUCKET/latest.json" \
             --endpoint-url "$EP" --content-type application/json \
