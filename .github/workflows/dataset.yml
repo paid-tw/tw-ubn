@@ -17,37 +17,75 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+
+      # Previous run's state.tsv (held on the rolling `data-latest` release) lets
+      # the pipeline emit only the day's delta. Absent on the first run.
+      - name: Fetch previous state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p prev
+          if gh release download data-latest --pattern 'state.tsv.gz' --dir prev 2>/dev/null; then
+            gunzip -f prev/state.tsv.gz
+            echo "PREV=--prev prev/state.tsv" >> "$GITHUB_ENV"
+          else
+            echo "no previous state (first run) — delta will be a full load"
+          fi
 
       - name: Build pipeline
         run: cargo build --release -p ubn-build
 
       - name: Run pipeline
-        run: ./target/release/ubn-build --out dist --shards 8192
+        run: ./target/release/ubn-build --out dist --shards 8192 $PREV
 
       - name: Read manifest
         id: m
         run: |
           echo "date=$(jq -r .dataDate dist/manifest.json)" >> "$GITHUB_OUTPUT"
           echo "tag=data-$(date +%Y%m%d)" >> "$GITHUB_OUTPUT"
+          echo "delta=$(jq -c .delta dist/manifest.json)" >> "$GITHUB_OUTPUT"
 
-      # Bulk artifacts -> GitHub Release (good for humans / downloads).
+      # Full artifacts + the delta/state -> a dated GitHub Release, and the
+      # rolling `data-latest` keeps the fresh state.tsv.gz for tomorrow's diff.
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          gzip -kf dist/state.tsv
           tar -czf dist/shards.tar.gz -C dist shards
           gh release create "${{ steps.m.outputs.tag }}" \
             dist/ubn.ndjson.gz dist/ubn.sqlite dist/shards.tar.gz dist/manifest.json \
+            dist/state.tsv.gz dist/d1/schema.sql dist/d1/delta.sql dist/changed-shards.txt \
             --title "Dataset ${{ steps.m.outputs.date }}" \
-            --notes "FIA tax registry snapshot ${{ steps.m.outputs.date }}. Open Government Data License v1.0." \
+            --notes "FIA snapshot ${{ steps.m.outputs.date }}. Delta ${{ steps.m.outputs.delta }}. OGDL v1.0." \
           || gh release upload "${{ steps.m.outputs.tag }}" \
-            dist/ubn.ndjson.gz dist/ubn.sqlite dist/shards.tar.gz dist/manifest.json --clobber
+            dist/ubn.ndjson.gz dist/ubn.sqlite dist/shards.tar.gz dist/manifest.json \
+            dist/state.tsv.gz dist/d1/schema.sql dist/d1/delta.sql dist/changed-shards.txt --clobber
+          gh release upload data-latest dist/state.tsv.gz dist/manifest.json --clobber \
+          || gh release create data-latest dist/state.tsv.gz dist/manifest.json \
+            --title "latest" --notes "rolling state for incremental diffs"
 
-      # Individual shards + manifest -> R2 (the checkout service origin), behind
-      # Cloudflare CDN. Requires repo secrets; skipped automatically if unset.
+      # Apply only the delta to D1 — the whole point of the incremental build.
+      # Skipped unless the D1 secrets are set.
+      - name: Apply D1 delta
+        if: ${{ env.CLOUDFLARE_API_TOKEN != '' && env.D1_DATABASE != '' }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          D1_DATABASE: ${{ secrets.D1_DATABASE }}
+        run: |
+          npx -y wrangler@4 d1 execute "$D1_DATABASE" --remote --file dist/d1/schema.sql -y
+          if [ -s dist/d1/delta.sql ]; then
+            npx -y wrangler@4 d1 execute "$D1_DATABASE" --remote --file dist/d1/delta.sql -y
+          else
+            echo "no row changes today"
+          fi
+
+      # Shards -> R2 (the static serving origin), versioned + immutable, behind
+      # the Cloudflare CDN. R2 writes are cheap, so this uploads the full set;
+      # changed-shards.txt is published for anyone serving from a stable path.
       - name: Sync shards to R2
         if: ${{ env.R2_ACCESS_KEY_ID != '' }}
         env:
