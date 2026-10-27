@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tw-ubn-lookup-d1",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "observability": { "enabled": true },
+  "vars": {
+    "ALLOWED_ORIGINS": "*",
+    "CACHE_TTL": "86400"
+  },
+  "d1_databases": [
+    // The Deploy to Cloudflare flow provisions this database and fills the id.
+    // Apply the pipeline's d1/schema.sql + delta.sql to populate it; until then
+    // /v1/vat falls back to the official FIA API and /v1/search returns empty.
+    {
+      "binding": "UBN_DB",
+      "database_name": "tw-ubn",
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ]
+}

@@ -3,7 +3,11 @@
 [![CI](https://github.com/paid-tw/tw-ubn/actions/workflows/ci.yml/badge.svg)](https://github.com/paid-tw/tw-ubn/actions/workflows/ci.yml)
 &nbsp;[English](README.en.md)
 
+免費版（R2 分片，跑在 Workers Free）：
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/paid-tw/tw-ubn/tree/main/worker)
+
+付費版（D1，含名稱搜尋，需 Workers Paid）：
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/paid-tw/tw-ubn/tree/main/worker-d1)
 
 台灣營業人（統一編號）的開放資料集，**每日更新**；並附一個極小的客戶端，專做最常見的
 情境：**結帳時輸入統編，自動帶出公司抬頭。**
@@ -60,23 +64,32 @@ if (validateUBN(ban)) {
 `validateUBN` 的檢查碼已對全部約 170 萬筆營業中統編驗證（100% 通過），採用 **2023 年
 後的規則**，而非許多網路片段裡過時的 `% 10` 版本。
 
-## 一鍵部署查詢服務（Cloudflare Worker）
+## 一鍵部署查詢服務（兩個版本）
 
-點上面的 **Deploy to Cloudflare** 按鈕，即可把 `worker/` 部署到你自己的 Cloudflare
-帳號：它會自動建立 R2 bucket，並給你一個查詢端點。
+上面兩個 **Deploy to Cloudflare** 按鈕各部署一個自包含的 Worker 到你的帳號：
+
+| | 免費版 `worker/` | 付費版 `worker-d1/` |
+|---|---|---|
+| 後端 | R2 分片 + FIA fallback | D1（SQLite）+ FIA fallback |
+| 端點 | `/v1/vat/:ban` | `/v1/vat/:ban` **＋ `/v1/search?name=`** |
+| 方案 | **Workers Free 即可** | **需 Workers Paid**（首載 340 萬列會撞 Free 的 10 萬寫入/日硬限制） |
+| 適合 | 純統編→抬頭自動帶入 | 還要**名稱/公司搜尋**（D1 的 SQL 優勢） |
+
+兩版共通：`/v1/vat/:ban` 先驗檢查碼 → 命中資料集就回（邊緣快取）→ 查無則轉打官方
+FIA 單筆 API 並快取（政府每統編每快取週期最多被打一次）；CORS 預設 `*`，正式上線請在
+`wrangler.jsonc` 的 `ALLOWED_ORIGINS` 設白名單；bindings 由部署流程自動建立，資料灌入前
+會先走 FIA fallback，跑 [dataset workflow](.github/workflows/dataset.yml) 後升級為「資料集優先」。
 
 ```
 GET https://<你的worker>/v1/vat/22099131
 → { "found": true, "ban": "22099131", "name": "台灣積體電路製造股份有限公司", "source": "dataset" }
+
+GET https://<你的worker-d1>/v1/search?name=台灣積體      # 名稱前綴搜尋，付費版限定
+→ { "query": "台灣積體", "count": 1, "results": [ … ] }
 ```
 
-- **R2 分片優先**：bucket 有資料就直接回（邊緣快取、不碰政府）。
-- **查無則 fallback**：bucket 尚空或新設統編，轉打官方 FIA 單筆 API 並在邊緣快取，
-  政府每個統編每個快取週期最多被打一次。
-- **CORS**：預設 `*`，正式上線請在 `wrangler.jsonc` 的 `ALLOWED_ORIGINS` 設白名單。
-- 部署後跑 [dataset workflow](.github/workflows/dataset.yml) 把分片灌進 R2，即升級為「資料集優先」。
-
-> 為何用 R2 分片而非 D1？有在真實 Cloudflare 帳號上實測（延遲／成本／灌資料）：[docs/bench-r2-vs-d1.md](docs/bench-r2-vs-d1.md)。
+> 為何預設用 R2 而非 D1？在真實 Cloudflare 帳號上實測過延遲／成本／灌資料，純點查 R2 更省：
+> [docs/bench-r2-vs-d1.md](docs/bench-r2-vs-d1.md)。D1 版的價值在於名稱搜尋。
 
 ## 專案結構
 
@@ -84,7 +97,8 @@ GET https://<你的worker>/v1/vat/22099131
 crates/ubn-core    Rust：統編檢查碼、FNV 分片雜湊、ROC 日期（權威來源）
 crates/ubn-build   Rust：建檔 pipeline（單一 binary，無外部工具鏈）
 client/            TypeScript：@paid-tw/ubn，瀏覽器結帳客戶端
-worker/            Cloudflare Worker：查詢服務（R2 分片 + FIA fallback），可一鍵部署
+worker/            Cloudflare Worker（免費版）：R2 分片 + FIA fallback，可一鍵部署
+worker-d1/         Cloudflare Worker（付費版）：D1 後端 + 名稱搜尋，可一鍵部署
 ```
 
 ## 建置資料集
