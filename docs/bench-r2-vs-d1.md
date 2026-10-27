@@ -63,9 +63,12 @@ So D1 *build speed is fine*. The real D1 ingestion costs are two:
    reported `rows_written: 400003` — **2× the inserts**, because of the single
    `PRIMARY KEY` index. A full 1.7 M reload with one index ≈ **3.4 M writes/day**.
 2. **The FIA snapshot is a full dump (no diffs).** A daily *full* reload pays that
-   every day. The fix is an incremental upsert (diff today's snapshot against
-   yesterday's — cheap with the Rust pipeline) so you only write the delta
-   (~thousands/day), which makes D1 cost negligible but is code you must build.
+   every day. The fix is an incremental upsert — and it's implemented: run
+   `ubn-build --prev state.tsv`, which diffs today against the previous state and
+   emits `d1/delta.sql` (one-row `ON CONFLICT` upserts + chunked deletes) plus a
+   fresh `state.tsv`. Only changed rows are written (~thousands/day), so the D1
+   write cost drops to ~cents. The GitHub Actions workflow applies `delta.sql` to
+   D1 when the `CLOUDFLARE_API_TOKEN` / `D1_DATABASE` secrets are set.
 
 R2 sidesteps all of this: a rebuild just rewrites 8,192 small objects — flat,
 and writes don't multiply.

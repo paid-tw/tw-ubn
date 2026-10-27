@@ -93,7 +93,13 @@ Pipeline 是自包含的 Rust binary——不需 shell/node/duckdb 工具鏈：
 cargo run --release -p ubn-build -- --out dist --shards 8192
 # 離線、對本機檔案跑（略過向政府下載）：
 cargo run --release -p ubn-build -- --active-zip BGMOPEN1.zip --no-suspended --out dist
+# 增量：帶上次的 state.tsv，只產出當日變動的 D1 upsert（dist/d1/delta.sql）
+cargo run --release -p ubn-build -- --out dist --prev prev/state.tsv
 ```
+
+每次建置都會輸出 `state.tsv`（供下次 diff）、`d1/delta.sql`（upsert+delete）、
+`changed-shards.txt`。日更只寫變動列，D1 寫入成本因此趨近於零——比較見
+[docs/bench-r2-vs-d1.md](docs/bench-r2-vs-d1.md)。
 
 CI 每日執行並發布產物，見 [`.github/workflows/dataset.yml`](.github/workflows/dataset.yml)。
 
