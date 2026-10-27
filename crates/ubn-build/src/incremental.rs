@@ -125,6 +125,22 @@ pub fn write_schema_sql(path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Idempotent column adds for D1 databases created before these columns
+/// existed. `CREATE TABLE IF NOT EXISTS` never alters an existing table, so an
+/// old `ubn` would lack `suspension_date` / `suspension_date_iso` and the first
+/// delta upsert would fail with "table ubn has no column named suspension_date".
+/// Apply each statement on its own, ignoring the "duplicate column name" error a
+/// freshly-created table raises.
+pub fn write_migrate_sql(path: &Path) -> Result<()> {
+    let mut w = BufWriter::new(File::create(path)?);
+    writeln!(
+        w,
+        "ALTER TABLE ubn ADD COLUMN suspension_date TEXT;\n\
+         ALTER TABLE ubn ADD COLUMN suspension_date_iso TEXT;"
+    )?;
+    Ok(())
+}
+
 /// Emit the delta as one-row upserts + chunked deletes (no transaction wrapper).
 pub fn write_delta_sql(records: &[Record], d: &Diff, path: &Path) -> Result<()> {
     let mut w = BufWriter::new(File::create(path)?);
@@ -234,6 +250,11 @@ mod tests {
         let schema = std::fs::read_to_string(&schema_path).unwrap();
         assert!(schema.contains("suspension_date TEXT"));
         assert!(schema.contains("CREATE INDEX IF NOT EXISTS idx_name ON ubn (name)"));
+        let migrate_path = dir.join("migrate.sql");
+        write_migrate_sql(&migrate_path).unwrap();
+        let migrate = std::fs::read_to_string(&migrate_path).unwrap();
+        assert!(migrate.contains("ALTER TABLE ubn ADD COLUMN suspension_date TEXT;"));
+        assert!(migrate.contains("ALTER TABLE ubn ADD COLUMN suspension_date_iso TEXT;"));
         let sql = std::fs::read_to_string(&p).unwrap();
         assert!(sql.contains("'O''Reilly 商行'"));
         assert!(sql.contains("ON CONFLICT(ban) DO UPDATE"));

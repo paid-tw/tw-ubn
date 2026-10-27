@@ -89,6 +89,12 @@ jobs:
           D1_DATABASE: ${{ secrets.D1_DATABASE }}
         run: |
           npx -y wrangler@4 d1 execute "$D1_DATABASE" --remote --file dist/d1/schema.sql -y
+          # Upgrade pre-existing databases: add any new columns, ignoring the
+          # duplicate-column error a freshly-created table raises.
+          while IFS= read -r stmt; do
+            [ -z "$stmt" ] && continue
+            npx -y wrangler@4 d1 execute "$D1_DATABASE" --remote --command "$stmt" -y 2>/dev/null || true
+          done < dist/d1/migrate.sql
           if [ -s dist/d1/delta.sql ]; then
             npx -y wrangler@4 d1 execute "$D1_DATABASE" --remote --file dist/d1/delta.sql -y
           else
