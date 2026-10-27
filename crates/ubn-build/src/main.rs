@@ -119,12 +119,14 @@ fn write_sqlite(records: &[Record], path: &std::path::Path) -> Result<()> {
          CREATE TABLE ubn(
            ban TEXT, name TEXT, address TEXT, capital TEXT,
            setup_date TEXT, setup_date_iso TEXT, org_type TEXT,
-           use_invoice INTEGER, status TEXT, industries TEXT);",
+           use_invoice INTEGER, status TEXT, industries TEXT,
+           suspension_date TEXT, suspension_date_iso TEXT);",
     )?;
     {
         let tx = conn.transaction()?;
         {
-            let mut stmt = tx.prepare("INSERT INTO ubn VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)")?;
+            let mut stmt =
+                tx.prepare("INSERT INTO ubn VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)")?;
             for r in records {
                 stmt.execute(params![
                     r.ban,
@@ -137,6 +139,8 @@ fn write_sqlite(records: &[Record], path: &std::path::Path) -> Result<()> {
                     r.use_invoice,
                     r.status,
                     serde_json::to_string(&r.industries)?,
+                    r.suspension_date,
+                    r.suspension_date_iso,
                 ])?;
             }
         }
@@ -145,6 +149,18 @@ fn write_sqlite(records: &[Record], path: &std::path::Path) -> Result<()> {
     conn.execute("CREATE INDEX idx_ban ON ubn(ban)", [])?;
     conn.execute("VACUUM", [])?;
     Ok(())
+}
+
+/// Suspended rows first so a duplicate UBN (unlikely) resolves to the active row.
+fn merge_records(suspended: Vec<Record>, active: Vec<Record>) -> Vec<Record> {
+    let mut by_ban: BTreeMap<String, Record> = BTreeMap::new();
+    for r in suspended {
+        by_ban.insert(r.ban.clone(), r);
+    }
+    for r in active {
+        by_ban.insert(r.ban.clone(), r);
+    }
+    by_ban.into_values().collect()
 }
 
 fn main() -> Result<()> {
@@ -156,25 +172,28 @@ fn main() -> Result<()> {
         Some(p) => csv_from_zip(&fs::read(p)?)?,
         None => csv_from_zip(&http_get(ACTIVE_URL)?)?,
     };
-    let active = parse_csv(active_csv.as_bytes(), Status::Active)?;
+    let active = parse_csv(active_csv.as_bytes(), Status::Active)
+        .context("parsing active registry (BGMOPEN1)")?;
     let data_date = active.data_date.clone();
 
-    // Suspended first so an (unlikely) duplicate UBN resolves to the active row.
-    let mut by_ban: BTreeMap<String, Record> = BTreeMap::new();
-    if !args.no_suspended {
+    let suspended_records = if args.no_suspended {
+        Vec::new()
+    } else {
         eprintln!("==> loading suspended tax registry");
         let csv = match &args.suspended_csv {
             Some(p) => fs::read_to_string(p)?,
             None => String::from_utf8(http_get(SUSPENDED_URL)?)?,
         };
-        for r in parse_csv(csv.as_bytes(), Status::Suspended)?.records {
-            by_ban.insert(r.ban.clone(), r);
-        }
-    }
-    for r in active.records {
-        by_ban.insert(r.ban.clone(), r);
-    }
-    let records: Vec<Record> = by_ban.into_values().collect();
+        let suspended = parse_csv(csv.as_bytes(), Status::Suspended)
+            .context("parsing suspended registry (BGMOPEN1X)")?;
+        eprintln!(
+            "    {} suspended rows (data date {:?})",
+            suspended.records.len(),
+            suspended.data_date
+        );
+        suspended.records
+    };
+    let records = merge_records(suspended_records, active.records);
     eprintln!("==> {} records (data date {:?})", records.len(), data_date);
 
     eprintln!("==> writing shards ({})", args.shards);
@@ -231,3 +250,6 @@ fn chrono_now() -> String {
         secs % 60
     )
 }
+
+#[cfg(test)]
+mod build_tests;

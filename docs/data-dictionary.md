@@ -58,6 +58,30 @@ UTF-8, no BOM. Original header → field name used in this repo:
 | 行業代號, 名稱 | `industry_code`, `industry_name` | Primary industry |
 | 行業代號1..3, 名稱1..3 | `industry_code1..3`, `industry_name1..3` | Additional industries |
 
+`ubn-build` maps those columns **by header name, in any order**. The header
+must be exactly this set. An extra, missing, duplicate, or empty column name
+aborts the build — a positional read will not be guessed. Both files start
+with a sentinel row (the extract date in `營業地址`, empty 統一編號), which
+is recorded as `dataDate` and dropped.
+
+### Suspended file (`BGMOPEN1X.csv`)
+
+Same columns as `BGMOPEN1`, plus `停業日期` (ROC `YYYMMDD`, occasionally
+blank). In the upstream file it sits between `組織別名稱` and `使用統一發票`;
+the parser does not depend on that position. The expected header is the
+active set plus `停業日期`, and any other shape is an error.
+
+| Published field | Notes |
+| --- | --- |
+| `suspension_date` | Raw ROC date, or null when the cell is blank. Absent as a value on active rows (the column is not in `BGMOPEN1`). |
+| `suspension_date_iso` | `roc_to_iso(suspension_date)`; null when the raw value is missing or not a real month/day. |
+| `status` | `suspended` for this file, `active` for `BGMOPEN1`. Already stored on the full dataset (`ubn.ndjson.gz`, `ubn.sqlite`). |
+
+On the 2026-10-27 extract (sentinel `28-OCT-26`) the suspended file has
+114,612 data rows, of which **94,999** have `使用統一發票=Y` and 19,613 have
+`N`. A positional parse of that file reported `Y` for **0** rows, because
+index 7 is `停業日期`.
+
 ## GCIS company fields used for validation
 
 `Company_Name`, `Company_Status_Desc` (e.g. 核准設立 / 解散 / 撤銷),
