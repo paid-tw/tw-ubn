@@ -74,6 +74,8 @@ GET https://<你的worker>/v1/vat/22099131
 - **CORS**：預設 `*`，正式上線請在 `wrangler.jsonc` 的 `ALLOWED_ORIGINS` 設白名單。
 - 部署後跑 [dataset workflow](.github/workflows/dataset.yml) 把分片灌進 R2，即升級為「資料集優先」。
 
+> 為何用 R2 分片而非 D1？有在真實 Cloudflare 帳號上實測（延遲／成本／灌資料）：[docs/bench-r2-vs-d1.md](docs/bench-r2-vs-d1.md)。
+
 ## 專案結構
 
 ```

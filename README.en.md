@@ -83,6 +83,9 @@ GET https://<your-worker>/v1/vat/22099131
 - After deploy, run the [dataset workflow](.github/workflows/dataset.yml) to fill
   R2 and upgrade from "FIA fallback" to "dataset first".
 
+> Why R2 shards and not D1? Measured on a real Cloudflare account (latency /
+> cost / ingestion): [docs/bench-r2-vs-d1.md](docs/bench-r2-vs-d1.md).
+
 ## Repository layout
 
 ```
