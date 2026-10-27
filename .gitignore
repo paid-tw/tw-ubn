@@ -7,3 +7,6 @@ tmp/
 *.ndjson
 *.ndjson.gz
 .DS_Store
+
+# Rust
+/target
