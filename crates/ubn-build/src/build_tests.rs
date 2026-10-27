@@ -118,6 +118,20 @@ fn fixture_rows_survive_ndjson_sqlite_and_shards() -> Result<()> {
         .context("shard contains 87003412")?;
     assert_eq!(shard_row["useInvoice"], true);
     assert_eq!(shard_row["name"], "惜緣農業資材行");
+    assert_eq!(shard_row["status"], "suspended");
+
+    let active_bucket = shard_of("47588972", 32);
+    let active_shard: serde_json::Value = serde_json::from_str(&fs::read_to_string(
+        dir.0.join("shards").join(format!("{active_bucket}.json")),
+    )?)?;
+    let active_row = active_shard
+        .as_array()
+        .context("shard is an array")?
+        .iter()
+        .find(|r| r["ban"] == "47588972")
+        .context("shard contains 47588972")?;
+    assert_eq!(active_row["status"], "active");
+    assert_eq!(active_row["useInvoice"], true);
     Ok(())
 }
 

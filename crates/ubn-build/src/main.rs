@@ -8,7 +8,7 @@
 //! Outputs, under --out (default ./dist):
 //!   ubn.ndjson.gz    full dataset, one JSON object per line
 //!   ubn.sqlite       full dataset, indexed on ban
-//!   shards/<n>.json  per-UBN shards (ban -> {name,address,useInvoice})
+//!   shards/<n>.json  per-UBN shards (ban -> {name,address,useInvoice,status})
 //!   manifest.json    data date, row count, shard count, hash, license
 //!
 //! Usage:

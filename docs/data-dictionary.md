@@ -75,7 +75,7 @@ active set plus `停業日期`, and any other shape is an error.
 | --- | --- |
 | `suspension_date` | Raw ROC date, or null when the cell is blank. Absent as a value on active rows (the column is not in `BGMOPEN1`). |
 | `suspension_date_iso` | `roc_to_iso(suspension_date)`; null when the raw value is missing or not a real month/day. |
-| `status` | `suspended` for this file, `active` for `BGMOPEN1`. Already stored on the full dataset (`ubn.ndjson.gz`, `ubn.sqlite`). |
+| `status` | `suspended` for this file, `active` for `BGMOPEN1`. Stored on the full dataset and on each shard record. |
 
 On the 2026-10-27 extract (sentinel `28-OCT-26`) the suspended file has
 114,612 data rows, of which **94,999** have `使用統一發票=Y` and 19,613 have
@@ -92,6 +92,13 @@ index 7 is `停業日期`.
 
 See `pipeline/build.sh`. `manifest.json` records `dataDate`, `rows`, `shards`
 (default 8192), and `hash` (`fnv1a-32`) so clients shard identically.
+
+`shards/<n>.json` is a JSON array of `{ban, name, address, useInvoice, status}`.
+`status` is `"active"` or `"suspended"`. Shards built before that field existed
+omit it; clients must treat a missing `status` as unknown, not as active.
+Adding the field is backward compatible for readers that ignore unknown JSON
+keys. `suspension_date` is not copied onto shards; it is only on
+`ubn.ndjson.gz` and `ubn.sqlite`.
 
 ## UBN checksum
 

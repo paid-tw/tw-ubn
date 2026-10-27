@@ -36,6 +36,21 @@ export function rocToISO(roc: string | null | undefined): string | null {
   return `${year}-${mm}-${dd}`;
 }
 
+export type RegistryStatus = 'active' | 'suspended';
+
+/** One object inside a published `shards/<n>.json` file. */
+export interface ShardRow {
+  ban: string;
+  name?: string;
+  address?: string;
+  useInvoice?: boolean;
+  /**
+   * Omitted on shards built before the header-driven pipeline. Missing means
+   * unknown, not active. The suspension date is not part of the shard.
+   */
+  status?: RegistryStatus;
+}
+
 export interface UBNResult {
   found: boolean;
   ban: string;
@@ -43,7 +58,22 @@ export interface UBNResult {
   address?: string;
   useInvoice?: boolean;
   setupDate?: string | null;
+  /** Carried from the shard when present. See `ShardRow.status`. */
+  status?: RegistryStatus;
   source?: 'dataset' | 'fia-api';
+}
+
+/** Map a dataset shard row onto the lookup result, including `status` when the shard has it. */
+export function datasetResult(row: ShardRow): UBNResult {
+  return {
+    found: true,
+    ban: row.ban,
+    name: row.name,
+    address: row.address,
+    useInvoice: row.useInvoice,
+    status: row.status,
+    source: 'dataset',
+  };
 }
 
 /** Map the FIA per-record API JSON onto the unified result shape. */

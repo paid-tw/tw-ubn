@@ -59,13 +59,19 @@ pub struct Record {
 }
 
 /// The minimal record published in each per-UBN shard (checkout autofill).
-#[derive(Debug, Clone, Serialize)]
+///
+/// `status` was added with the header-driven build. Shards published before
+/// that omit the field; readers must treat a missing `status` as unknown,
+/// not as active. `suspension_date` is intentionally not copied here — it
+/// lives on the full dataset (`ubn.ndjson.gz`, `ubn.sqlite`) only.
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct ShardRecord {
     pub ban: String,
     pub name: String,
     pub address: String,
     #[serde(rename = "useInvoice")]
     pub use_invoice: bool,
+    pub status: &'static str,
 }
 
 impl Record {
@@ -75,6 +81,7 @@ impl Record {
             name: self.name.clone(),
             address: self.address.clone(),
             use_invoice: self.use_invoice,
+            status: self.status,
         }
     }
 }

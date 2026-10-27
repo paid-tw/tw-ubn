@@ -19,7 +19,7 @@ CDN 快取的請求。
           │
           ▼  ubn-build（Rust）：正規化（ROC→西元）、合併並標 status
         dist/
-          ├─ shards/<n>.json   8192 個逐統編分片（ban → name/address/useInvoice）
+          ├─ shards/<n>.json   8192 個逐統編分片（ban → name/address/useInvoice/status）
           ├─ ubn.sqlite        完整資料集，統編建索引
           ├─ ubn.ndjson.gz     完整資料集，逐行 JSON
           └─ manifest.json     資料日期、筆數、片數、雜湊、授權
@@ -31,6 +31,8 @@ CDN 快取的請求。
 - **FIA 稅籍**是主來源：涵蓋所有營業人（公司**與**商號），且帶有**發票抬頭**與**使用
   統一發票**旗標——正是結帳需要的。每日更新。
 - **營業中／停業狀態**由 FIA 自己提供（`BGMOPEN1` + `BGMOPEN1X`），不需要 GCIS。
+  分片上的 `status` 為 `active` 或 `suspended`。較早的分片沒有這個欄位；缺值代表未知，
+  不要當成營業中。停業日期只在完整資料集，不在結帳分片。
 - **GCIS**（公司／商業登記）為選用的逐筆 enrichment（例如負責人）；為何沒有可用的
   GCIS 全量 master，詳見 [`docs/data-dictionary.md`](docs/data-dictionary.md)。
 - 尚未進入當日快照的新設統編，會 fallback 到**有官方文件的 FIA 單筆 API**，並擺在你
@@ -112,5 +114,5 @@ Rust core 與 TS 客戶端各自實作同樣的 ~3 個函式；共用的測試�
 
 ## 免責聲明
 
-資料以政府來源原樣提供，可能落後現況最多一天（主檔亦不含停業／歇業者）。涉及法律或財務
-的重要用途，請以官方來源為準。
+資料以政府來源原樣提供，可能落後現況最多一天。停業列的 `status` 為 `suspended`
+（停業日期只在完整資料集）。涉及法律或財務的重要用途，請以官方來源為準。

@@ -1,6 +1,9 @@
 import { validateUBN } from './checksum.js';
 import { shardOf, DEFAULT_SHARDS } from './shard.js';
 
+/** Registry status written onto shards. Older shards omit the field. */
+export type RegistryStatus = 'active' | 'suspended';
+
 export interface UBNRecord {
   ban: string;
   /** Business name as registered for tax — this is the invoice title (抬頭). */
@@ -9,6 +12,15 @@ export interface UBNRecord {
   address?: string;
   /** Whether the entity issues uniform invoices (使用統一發票). */
   useInvoice?: boolean;
+  /**
+   * `active` or `suspended`, from `BGMOPEN1` / `BGMOPEN1X`.
+   *
+   * Present on shards built by the header-driven pipeline. Shards published
+   * before that omit `status`; a missing value means unknown — do not treat
+   * it as active. The suspension date itself is not on the shard; it is only
+   * in the full dataset (`ubn.ndjson.gz` / `ubn.sqlite`).
+   */
+  status?: RegistryStatus;
 }
 
 export interface LookupOptions {

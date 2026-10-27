@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeFia, rocToISO, shardOf, validateUBN } from '../lib';
+import { datasetResult, normalizeFia, rocToISO, shardOf, validateUBN } from '../lib';
 
 describe('worker lib parity with ubn-core', () => {
   it('validates real UBNs', () => {
@@ -17,6 +17,26 @@ describe('worker lib parity with ubn-core', () => {
   it('converts ROC dates', () => {
     expect(rocToISO('0760321')).toBe('1987-03-21');
     expect(rocToISO('')).toBeNull();
+  });
+
+  it('carries shard status and leaves it unset for older shards', () => {
+    const suspended = datasetResult({
+      ban: '87003412',
+      name: '惜緣農業資材行',
+      useInvoice: true,
+      status: 'suspended',
+    });
+    expect(suspended).toMatchObject({
+      found: true,
+      ban: '87003412',
+      useInvoice: true,
+      status: 'suspended',
+      source: 'dataset',
+    });
+
+    const legacy = datasetResult({ ban: '22099131', name: '台積電', useInvoice: true });
+    expect(legacy.status).toBeUndefined();
+    expect(JSON.parse(JSON.stringify(legacy)).status).toBeUndefined();
   });
 
   it('normalizes a FIA response', () => {
