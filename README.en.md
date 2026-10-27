@@ -3,6 +3,8 @@
 [![CI](https://github.com/paid-tw/tw-ubn/actions/workflows/ci.yml/badge.svg)](https://github.com/paid-tw/tw-ubn/actions/workflows/ci.yml)
 &nbsp;[繁體中文](README.md)
 
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/paid-tw/tw-ubn/tree/main/worker)
+
 An open, **daily-updated** dataset of Taiwan business registrations (統一編號 /
 UBN), plus a tiny client for the most common use case: **at checkout, the buyer
 types their UBN and the company title (抬頭) auto-fills.**
@@ -62,12 +64,32 @@ if (validateUBN(ban)) {
 The `validateUBN` checksum is verified against all ~1.7M active UBNs (100%); it
 uses the post-2023 rule, not the stale `% 10` one found in many snippets.
 
+## One-click lookup service (Cloudflare Worker)
+
+Click the **Deploy to Cloudflare** button above to deploy `worker/` to your own
+Cloudflare account. It provisions an R2 bucket and gives you an endpoint:
+
+```
+GET https://<your-worker>/v1/vat/22099131
+→ { "found": true, "ban": "22099131", "name": "台灣積體電路製造股份有限公司", "source": "dataset" }
+```
+
+- **R2 shards first**: served from the edge, never touching the government.
+- **Fallback on miss**: an empty bucket or a brand-new UBN proxies the official
+  FIA per-record API and caches it at the edge (government hit at most once per
+  UBN per cache window).
+- **CORS**: defaults to `*`; set an allowlist via `ALLOWED_ORIGINS` in
+  `wrangler.jsonc` for production.
+- After deploy, run the [dataset workflow](.github/workflows/dataset.yml) to fill
+  R2 and upgrade from "FIA fallback" to "dataset first".
+
 ## Repository layout
 
 ```
 crates/ubn-core    Rust: UBN checksum, FNV shard hash, ROC date (source of truth)
 crates/ubn-build   Rust: the build pipeline (a single binary, no external tools)
 client/            TypeScript: @paid-tw/ubn, the browser checkout client
+worker/            Cloudflare Worker: lookup service (R2 shards + FIA fallback), one-click deploy
 ```
 
 ## Building the dataset

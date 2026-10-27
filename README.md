@@ -3,6 +3,8 @@
 [![CI](https://github.com/paid-tw/tw-ubn/actions/workflows/ci.yml/badge.svg)](https://github.com/paid-tw/tw-ubn/actions/workflows/ci.yml)
 &nbsp;[English](README.en.md)
 
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/paid-tw/tw-ubn/tree/main/worker)
+
 台灣營業人（統一編號）的開放資料集，**每日更新**；並附一個極小的客戶端，專做最常見的
 情境：**結帳時輸入統編，自動帶出公司抬頭。**
 
@@ -56,12 +58,29 @@ if (validateUBN(ban)) {
 `validateUBN` 的檢查碼已對全部約 170 萬筆營業中統編驗證（100% 通過），採用 **2023 年
 後的規則**，而非許多網路片段裡過時的 `% 10` 版本。
 
+## 一鍵部署查詢服務（Cloudflare Worker）
+
+點上面的 **Deploy to Cloudflare** 按鈕，即可把 `worker/` 部署到你自己的 Cloudflare
+帳號：它會自動建立 R2 bucket，並給你一個查詢端點。
+
+```
+GET https://<你的worker>/v1/vat/22099131
+→ { "found": true, "ban": "22099131", "name": "台灣積體電路製造股份有限公司", "source": "dataset" }
+```
+
+- **R2 分片優先**：bucket 有資料就直接回（邊緣快取、不碰政府）。
+- **查無則 fallback**：bucket 尚空或新設統編，轉打官方 FIA 單筆 API 並在邊緣快取，
+  政府每個統編每個快取週期最多被打一次。
+- **CORS**：預設 `*`，正式上線請在 `wrangler.jsonc` 的 `ALLOWED_ORIGINS` 設白名單。
+- 部署後跑 [dataset workflow](.github/workflows/dataset.yml) 把分片灌進 R2，即升級為「資料集優先」。
+
 ## 專案結構
 
 ```
 crates/ubn-core    Rust：統編檢查碼、FNV 分片雜湊、ROC 日期（權威來源）
 crates/ubn-build   Rust：建檔 pipeline（單一 binary，無外部工具鏈）
 client/            TypeScript：@paid-tw/ubn，瀏覽器結帳客戶端
+worker/            Cloudflare Worker：查詢服務（R2 分片 + FIA fallback），可一鍵部署
 ```
 
 ## 建置資料集
