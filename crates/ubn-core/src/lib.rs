@@ -23,10 +23,10 @@ pub fn validate_ubn(ban: &str) -> bool {
         let product = (b[i] - b'0') as u32 * WEIGHTS[i];
         sum += product / 10 + product % 10; // sum of the product's two digits
     }
-    if sum % 5 == 0 {
+    if sum.is_multiple_of(5) {
         return true;
     }
-    b[6] == b'7' && (sum + 1) % 5 == 0
+    b[6] == b'7' && (sum + 1).is_multiple_of(5)
 }
 
 /// Map a UBN to its static shard bucket via 32-bit FNV-1a.
