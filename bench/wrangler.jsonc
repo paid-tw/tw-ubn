@@ -1,0 +1,15 @@
+{
+  // Local-only benchmark worker (R2 shards vs D1) — not deployed.
+  "name": "tw-ubn-bench",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "vars": { "SHARDS": "25" },
+  "r2_buckets": [{ "binding": "BENCH_R2", "bucket_name": "tw-ubn-bench" }],
+  "d1_databases": [
+    {
+      "binding": "BENCH_D1",
+      "database_name": "tw-ubn-bench",
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ]
+}

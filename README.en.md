@@ -86,6 +86,9 @@ GET https://<your-worker>/v1/vat/22099131
 - After deploy, run the [dataset workflow](.github/workflows/dataset.yml) to fill
   R2 and upgrade from "FIA fallback" to "dataset first".
 
+> Why R2 shards and not D1? Measured on a real Cloudflare account (latency /
+> cost / ingestion): [docs/bench-r2-vs-d1.md](docs/bench-r2-vs-d1.md).
+
 ## Repository layout
 
 ```
@@ -103,7 +106,14 @@ The pipeline is a self-contained Rust binary — no shell/node/duckdb toolchain:
 cargo run --release -p ubn-build -- --out dist --shards 8192
 # offline, against a local copy (skips the government fetch):
 cargo run --release -p ubn-build -- --active-zip BGMOPEN1.zip --no-suspended --out dist
+# incremental: pass the previous state.tsv to emit only the day's D1 upserts
+cargo run --release -p ubn-build -- --out dist --prev prev/state.tsv
 ```
+
+Every build also writes `state.tsv` (for the next diff), `d1/delta.sql`
+(upserts + deletes) and `changed-shards.txt`. A daily run writes only changed
+rows, so the D1 write cost drops to ~cents — see
+[docs/bench-r2-vs-d1.md](docs/bench-r2-vs-d1.md).
 
 CI runs it daily and publishes the artifacts; see
 [`.github/workflows/dataset.yml`](.github/workflows/dataset.yml).

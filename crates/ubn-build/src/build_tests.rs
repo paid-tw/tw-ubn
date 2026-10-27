@@ -1,8 +1,10 @@
 //! Integration-style coverage: real FIA fixture rows go through the same
 //! parse → merge → ndjson/sqlite/shard writers `main` uses.
 
+use super::attribution::IncludedSource;
+use super::incremental::Diff;
 use super::transform::{parse_csv, Status};
-use super::{merge_records, write_ndjson_gz, write_shards, write_sqlite};
+use super::{manifest_json, merge_records, write_ndjson_gz, write_shards, write_sqlite};
 use anyhow::{Context, Result};
 use flate2::read::GzDecoder;
 use rusqlite::{params, Connection};
@@ -56,6 +58,37 @@ fn ndjson_by_ban(path: &Path, ban: &str) -> Result<serde_json::Value> {
         }
     }
     anyhow::bail!("ndjson missing {ban}")
+}
+
+#[test]
+fn manifest_keeps_attribution_and_incremental_delta() -> Result<()> {
+    let delta = Diff {
+        upserts: vec![0, 1],
+        deletes: vec!["10000009".into()],
+        unchanged: 3,
+    };
+    let manifest = manifest_json(
+        Some("28-OCT-26"),
+        IncludedSource::Loaded(Some("28-OCT-26")),
+        11,
+        32,
+        "2026-10-27T22:00:00Z",
+        &delta,
+        true,
+    )?;
+    let statement = manifest["attribution"]["statement"]
+        .as_str()
+        .context("statement")?;
+    assert!(statement.contains("政府資料開放授權條款"));
+    assert_eq!(
+        manifest["attribution"]["licenseUrl"],
+        "https://data.gov.tw/license"
+    );
+    assert_eq!(manifest["delta"]["upserts"], 2);
+    assert_eq!(manifest["delta"]["deletes"], 1);
+    assert_eq!(manifest["delta"]["unchanged"], 3);
+    assert_eq!(manifest["delta"]["hadPrevious"], true);
+    Ok(())
 }
 
 #[test]

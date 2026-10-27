@@ -6,17 +6,24 @@
 //! Merging the two gives a `status` dimension without needing GCIS.
 //!
 //! Outputs, under --out (default ./dist):
-//!   ubn.ndjson.gz    full dataset, one JSON object per line
-//!   ubn.sqlite       full dataset, indexed on ban
-//!   shards/<n>.json  per-UBN shards (ban -> {name,address,useInvoice,status})
-//!   manifest.json    data date, row count, shard count, hash, OGDL attribution
+//!   ubn.ndjson.gz       full dataset, one JSON object per line
+//!   ubn.sqlite          full dataset, indexed on ban
+//!   shards/<n>.json     per-UBN shards (ban -> {name,address,useInvoice,status})
+//!   state.tsv           ban -> content hash, for the next run to diff against
+//!   d1/schema.sql       CREATE TABLE IF NOT EXISTS (apply once)
+//!   d1/delta.sql        upserts + deletes vs --prev (apply daily to D1)
+//!   changed-shards.txt  shard buckets touched by the delta (partial R2 sync)
+//!   manifest.json       data date, rows, shards, hash, OGDL attribution, delta counts
 //!
 //! Usage:
-//!   ubn-build [--out DIR] [--shards N]
+//!   ubn-build [--out DIR] [--shards N] [--prev state.tsv]
 //!             [--active-zip PATH] [--suspended-csv PATH] [--no-suspended]
 //! When the local paths are omitted the files are fetched over HTTPS.
+//! Pass the previous run's state.tsv as --prev so d1/delta.sql holds only the
+//! day's changes; without it, the delta is a full load.
 
 mod attribution;
+mod incremental;
 mod transform;
 
 use anyhow::{bail, Context, Result};
@@ -37,6 +44,7 @@ struct Args {
     active_zip: Option<PathBuf>,
     suspended_csv: Option<PathBuf>,
     no_suspended: bool,
+    prev: Option<PathBuf>,
 }
 
 fn parse_args() -> Result<Args> {
@@ -46,6 +54,7 @@ fn parse_args() -> Result<Args> {
         active_zip: None,
         suspended_csv: None,
         no_suspended: false,
+        prev: None,
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -56,6 +65,7 @@ fn parse_args() -> Result<Args> {
             "--active-zip" => a.active_zip = Some(PathBuf::from(next()?)),
             "--suspended-csv" => a.suspended_csv = Some(PathBuf::from(next()?)),
             "--no-suspended" => a.no_suspended = true,
+            "--prev" => a.prev = Some(PathBuf::from(next()?)),
             other => bail!("unknown argument: {other}"),
         }
     }
@@ -202,18 +212,45 @@ fn main() -> Result<()> {
     eprintln!("==> writing ubn.sqlite");
     write_sqlite(&records, &args.out.join("ubn.sqlite"))?;
 
+    // Incremental delta vs the previous run's state.
+    eprintln!("==> diffing against previous state");
+    let hashes: Vec<u64> = records.iter().map(incremental::row_hash).collect();
+    let prev = match &args.prev {
+        Some(p) => incremental::load_state(p)?,
+        None => Default::default(),
+    };
+    let delta = incremental::diff(&prev, &records, &hashes);
+    fs::create_dir_all(args.out.join("d1"))?;
+    incremental::write_state(&records, &hashes, &args.out.join("state.tsv"))?;
+    incremental::write_schema_sql(&args.out.join("d1/schema.sql"))?;
+    incremental::write_delta_sql(&records, &delta, &args.out.join("d1/delta.sql"))?;
+    incremental::write_changed_shards(
+        &records,
+        &delta,
+        args.shards,
+        &args.out.join("changed-shards.txt"),
+    )?;
+    eprintln!(
+        "==> delta: {} upserts, {} deletes, {} unchanged",
+        delta.upserts.len(),
+        delta.deletes.len(),
+        delta.unchanged
+    );
+
     let suspended = if args.no_suspended {
         IncludedSource::Skipped
     } else {
         IncludedSource::Loaded(suspended_date.as_deref())
     };
-    let manifest = attribution::build_manifest(
+    let manifest = manifest_json(
         data_date.as_deref(),
         suspended,
         records.len(),
         args.shards,
         &chrono_now(),
-    );
+        &delta,
+        args.prev.is_some(),
+    )?;
     fs::write(
         args.out.join("manifest.json"),
         serde_json::to_string_pretty(&manifest)?,
@@ -221,6 +258,32 @@ fn main() -> Result<()> {
 
     eprintln!("==> done; artifacts in {}", args.out.display());
     Ok(())
+}
+
+/// Attribution from this branch, plus the incremental `delta` counts main added.
+fn manifest_json(
+    active_date: Option<&str>,
+    suspended: IncludedSource<'_>,
+    rows: usize,
+    shards: u32,
+    built_at: &str,
+    delta: &incremental::Diff,
+    had_previous: bool,
+) -> Result<serde_json::Value> {
+    let mut manifest = serde_json::to_value(attribution::build_manifest(
+        active_date,
+        suspended,
+        rows,
+        shards,
+        built_at,
+    ))?;
+    manifest["delta"] = serde_json::json!({
+        "upserts": delta.upserts.len(),
+        "deletes": delta.deletes.len(),
+        "unchanged": delta.unchanged,
+        "hadPrevious": had_previous,
+    });
+    Ok(manifest)
 }
 
 /// Minimal RFC3339 UTC timestamp without pulling in a date crate.
