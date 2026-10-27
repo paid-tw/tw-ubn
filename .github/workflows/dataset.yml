@@ -67,14 +67,18 @@ jobs:
             ("FIA tax registry snapshot " + (.dataDate // "unknown") + ". rows=" + (.rows | tostring) + "."),
             ("Delta " + (.delta | tostring) + ".")
           ' dist/manifest.json > dist/release-notes.md
-          gh release create "${{ steps.m.outputs.tag }}" \
-            dist/ubn.ndjson.gz dist/ubn.sqlite dist/shards.tar.gz dist/manifest.json \
-            dist/state.tsv.gz dist/d1/schema.sql dist/d1/delta.sql dist/changed-shards.txt \
-            --title "Dataset ${{ steps.m.outputs.date }}" \
-            --notes-file dist/release-notes.md \
-          || gh release upload "${{ steps.m.outputs.tag }}" \
-            dist/ubn.ndjson.gz dist/ubn.sqlite dist/shards.tar.gz dist/manifest.json \
-            dist/state.tsv.gz dist/d1/schema.sql dist/d1/delta.sql dist/changed-shards.txt --clobber
+          ASSETS="dist/ubn.ndjson.gz dist/ubn.sqlite dist/shards.tar.gz dist/manifest.json
+                  dist/state.tsv.gz dist/d1/schema.sql dist/d1/delta.sql dist/changed-shards.txt"
+          if ! gh release create "${{ steps.m.outputs.tag }}" $ASSETS \
+                --title "Dataset ${{ steps.m.outputs.date }}" \
+                --notes-file dist/release-notes.md; then
+            # Same-day rerun: the release exists. Replace its assets AND refresh
+            # the title/notes so the attribution and version match the new data.
+            gh release upload "${{ steps.m.outputs.tag }}" $ASSETS --clobber
+            gh release edit "${{ steps.m.outputs.tag }}" \
+              --title "Dataset ${{ steps.m.outputs.date }}" \
+              --notes-file dist/release-notes.md
+          fi
           gh release upload data-latest dist/state.tsv.gz dist/manifest.json --clobber \
           || gh release create data-latest dist/state.tsv.gz dist/manifest.json \
             --title "latest" --notes "rolling state for incremental diffs"
