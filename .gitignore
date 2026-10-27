@@ -1,0 +1,9 @@
+node_modules/
+dist/
+tmp/
+*.zip
+*.duckdb
+*.sqlite
+*.ndjson
+*.ndjson.gz
+.DS_Store

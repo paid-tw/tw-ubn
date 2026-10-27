@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>tw-ubn demo</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body { font: 16px/1.5 system-ui, sans-serif; max-width: 34rem; margin: 2rem auto; padding: 0 1rem; }
+      input { font: inherit; padding: 0.5rem 0.6rem; width: 12rem; }
+      .out { margin-top: 1rem; padding: 0.8rem 1rem; border-radius: 8px; background: color-mix(in srgb, Canvas 92%, CanvasText); }
+      .muted { opacity: 0.6; }
+      code { font-family: ui-monospace, monospace; }
+    </style>
+  </head>
+  <body>
+    <h1>統編 → 抬頭</h1>
+    <p class="muted">輸入 8 碼統一編號，自動帶出營業人名稱。</p>
+    <input id="ban" inputmode="numeric" maxlength="8" placeholder="22099131" autocomplete="off" />
+    <div id="out" class="out muted">等待輸入…</div>
+
+    <script type="module">
+      // Point this at your CDN (R2 behind Cloudflare). Shards live at <base>/shards/<n>.json
+      const BASE_URL = 'https://ubn.example.com';
+      const SHARDS = 8192;
+
+      const WEIGHTS = [1, 2, 1, 2, 1, 2, 4, 1];
+      function validateUBN(ban) {
+        if (!/^\d{8}$/.test(ban)) return false;
+        let sum = 0;
+        for (let i = 0; i < 8; i++) {
+          const p = Number(ban[i]) * WEIGHTS[i];
+          sum += Math.floor(p / 10) + (p % 10);
+        }
+        if (sum % 5 === 0) return true;
+        return ban[6] === '7' && (sum + 1) % 5 === 0;
+      }
+      function shardOf(ban) {
+        let h = 0x811c9dc5;
+        for (let i = 0; i < ban.length; i++) { h ^= ban.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+        return (h >>> 0) % SHARDS;
+      }
+
+      const input = document.getElementById('ban');
+      const out = document.getElementById('out');
+      let timer;
+
+      function show(msg, muted = false) {
+        out.textContent = msg;
+        out.classList.toggle('muted', muted);
+      }
+
+      async function lookup(ban) {
+        if (!validateUBN(ban)) return show('統編格式/檢查碼不正確', true);
+        show('查詢中…', true);
+        try {
+          const ctrl = new AbortController();
+          const t = setTimeout(() => ctrl.abort(), 2000);
+          const res = await fetch(`${BASE_URL}/shards/${shardOf(ban)}.json`, { signal: ctrl.signal });
+          clearTimeout(t);
+          const rows = await res.json();
+          const rec = rows.find((r) => r.ban === ban);
+          show(rec ? `${rec.name}${rec.address ? '｜' + rec.address : ''}` : '查無此統編（可改用官方 API 補漏）', !rec);
+        } catch {
+          show('查詢失敗，請手動輸入抬頭', true); // never block checkout
+        }
+      }
+
+      input.addEventListener('input', () => {
+        clearTimeout(timer);
+        const ban = input.value.trim();
+        if (ban.length === 8) timer = setTimeout(() => lookup(ban), 150); // debounce
+        else show('等待輸入…', true);
+      });
+    </script>
+  </body>
+</html>

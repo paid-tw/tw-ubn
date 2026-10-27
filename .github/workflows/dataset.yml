@@ -1,0 +1,78 @@
+name: Build dataset
+
+on:
+  schedule:
+    - cron: '30 20 * * *' # daily, 20:30 UTC (~04:30 Asia/Taipei next day)
+  workflow_dispatch: {} # manual trigger + keeps the schedule from auto-pausing
+
+permissions:
+  contents: write # create releases / upload assets
+
+concurrency:
+  group: dataset
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install DuckDB CLI
+        run: |
+          curl -sSL -o /tmp/duckdb.zip \
+            https://github.com/duckdb/duckdb/releases/download/v1.3.2/duckdb_cli-linux-amd64.zip
+          unzip -o /tmp/duckdb.zip -d /usr/local/bin
+          duckdb --version
+
+      - name: Build dataset
+        run: bash pipeline/build.sh
+
+      - name: Read manifest
+        id: m
+        run: |
+          echo "date=$(jq -r .dataDate dist/manifest.json)" >> "$GITHUB_OUTPUT"
+          echo "tag=data-$(date +%Y%m%d)" >> "$GITHUB_OUTPUT"
+
+      # Bulk artifacts -> GitHub Release (good for humans / downloads).
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tar -czf dist/shards.tar.gz -C dist shards
+          gh release create "${{ steps.m.outputs.tag }}" \
+            dist/ubn.ndjson.gz dist/ubn.sqlite dist/shards.tar.gz dist/manifest.json \
+            --title "Dataset ${{ steps.m.outputs.date }}" \
+            --notes "FIA tax registry snapshot ${{ steps.m.outputs.date }}. Open Government Data License v1.0." \
+          || gh release upload "${{ steps.m.outputs.tag }}" \
+            dist/ubn.ndjson.gz dist/ubn.sqlite dist/shards.tar.gz dist/manifest.json --clobber
+
+      # Individual shards + manifest -> R2 (the checkout service origin), behind
+      # Cloudflare CDN. Requires repo secrets; skipped automatically if unset.
+      - name: Sync shards to R2
+        if: ${{ env.R2_ACCESS_KEY_ID != '' }}
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          export AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
+          export AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
+          EP="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          V="v/$(date +%Y%m%d)"
+          # versioned, immutable
+          aws s3 sync dist/shards "s3://$R2_BUCKET/$V/shards" \
+            --endpoint-url "$EP" --checksum-algorithm CRC32 \
+            --content-type application/json --cache-control 'public, max-age=31536000, immutable'
+          aws s3 cp dist/manifest.json "s3://$R2_BUCKET/$V/manifest.json" \
+            --endpoint-url "$EP" --content-type application/json
+          # short-TTL pointer to the current version
+          printf '{"latest":"%s"}' "$V" > latest.json
+          aws s3 cp latest.json "s3://$R2_BUCKET/latest.json" \
+            --endpoint-url "$EP" --content-type application/json \
+            --cache-control 'public, max-age=300'
