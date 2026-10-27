@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { validateUBN } from '../checksum.js';
 import { rocToISO } from '../rocDate.js';
@@ -41,5 +43,29 @@ describe('shardOf', () => {
     expect(a).toBe(shardOf('22099131', 8192));
     expect(a).toBeGreaterThanOrEqual(0);
     expect(a).toBeLessThan(8192);
+  });
+
+  // Shared vector with the Rust core test (crates/ubn-core): both impls MUST
+  // bucket this UBN identically, or the client reads the wrong shard.
+  it('matches the Rust core vector', () => {
+    expect(shardOf('22099131', 256)).toBe(216);
+  });
+});
+
+// Cross-implementation parity: the TS client must accept the exact same real
+// UBNs as the Rust core, using the same fixture file.
+describe('parity with Rust core', () => {
+  const fixture = fileURLToPath(
+    new URL('../../../crates/ubn-core/tests/fixtures/sample_bans.txt', import.meta.url),
+  );
+  const bans = readFileSync(fixture, 'utf8')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.length === 8);
+
+  it('accepts every sampled real UBN', () => {
+    expect(bans.length).toBeGreaterThan(1000);
+    const failures = bans.filter((b) => !validateUBN(b));
+    expect(failures).toEqual([]);
   });
 });
