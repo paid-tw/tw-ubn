@@ -6,16 +6,23 @@
 //! Merging the two gives a `status` dimension without needing GCIS.
 //!
 //! Outputs, under --out (default ./dist):
-//!   ubn.ndjson.gz    full dataset, one JSON object per line
-//!   ubn.sqlite       full dataset, indexed on ban
-//!   shards/<n>.json  per-UBN shards (ban -> {name,address,useInvoice})
-//!   manifest.json    data date, row count, shard count, hash, license
+//!   ubn.ndjson.gz       full dataset, one JSON object per line
+//!   ubn.sqlite          full dataset, indexed on ban
+//!   shards/<n>.json     per-UBN shards (ban -> {name,address,useInvoice})
+//!   state.tsv           ban -> content hash, for the next run to diff against
+//!   d1/schema.sql       CREATE TABLE IF NOT EXISTS (apply once)
+//!   d1/delta.sql        upserts + deletes vs --prev (apply daily to D1)
+//!   changed-shards.txt  shard buckets touched by the delta (partial R2 sync)
+//!   manifest.json       data date, rows, shards, hash, license, delta counts
 //!
 //! Usage:
-//!   ubn-build [--out DIR] [--shards N]
+//!   ubn-build [--out DIR] [--shards N] [--prev state.tsv]
 //!             [--active-zip PATH] [--suspended-csv PATH] [--no-suspended]
 //! When the local paths are omitted the files are fetched over HTTPS.
+//! Pass the previous run's state.tsv as --prev so d1/delta.sql holds only the
+//! day's changes; without it, the delta is a full load.
 
+mod incremental;
 mod transform;
 
 use anyhow::{bail, Context, Result};
@@ -38,6 +45,7 @@ struct Args {
     active_zip: Option<PathBuf>,
     suspended_csv: Option<PathBuf>,
     no_suspended: bool,
+    prev: Option<PathBuf>,
 }
 
 fn parse_args() -> Result<Args> {
@@ -47,6 +55,7 @@ fn parse_args() -> Result<Args> {
         active_zip: None,
         suspended_csv: None,
         no_suspended: false,
+        prev: None,
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -57,6 +66,7 @@ fn parse_args() -> Result<Args> {
             "--active-zip" => a.active_zip = Some(PathBuf::from(next()?)),
             "--suspended-csv" => a.suspended_csv = Some(PathBuf::from(next()?)),
             "--no-suspended" => a.no_suspended = true,
+            "--prev" => a.prev = Some(PathBuf::from(next()?)),
             other => bail!("unknown argument: {other}"),
         }
     }
@@ -184,6 +194,31 @@ fn main() -> Result<()> {
     eprintln!("==> writing ubn.sqlite");
     write_sqlite(&records, &args.out.join("ubn.sqlite"))?;
 
+    // Incremental delta vs the previous run's state.
+    eprintln!("==> diffing against previous state");
+    let hashes: Vec<u64> = records.iter().map(incremental::row_hash).collect();
+    let prev = match &args.prev {
+        Some(p) => incremental::load_state(p)?,
+        None => Default::default(),
+    };
+    let delta = incremental::diff(&prev, &records, &hashes);
+    fs::create_dir_all(args.out.join("d1"))?;
+    incremental::write_state(&records, &hashes, &args.out.join("state.tsv"))?;
+    incremental::write_schema_sql(&args.out.join("d1/schema.sql"))?;
+    incremental::write_delta_sql(&records, &delta, &args.out.join("d1/delta.sql"))?;
+    incremental::write_changed_shards(
+        &records,
+        &delta,
+        args.shards,
+        &args.out.join("changed-shards.txt"),
+    )?;
+    eprintln!(
+        "==> delta: {} upserts, {} deletes, {} unchanged",
+        delta.upserts.len(),
+        delta.deletes.len(),
+        delta.unchanged
+    );
+
     let manifest = serde_json::json!({
         "source": ACTIVE_URL,
         "sourceAgency": "財政部財政資訊中心 (Fiscal Information Agency, Ministry of Finance)",
@@ -193,6 +228,12 @@ fn main() -> Result<()> {
         "shards": args.shards,
         "hash": "fnv1a-32",
         "license": "政府資料開放授權條款-第1版 (Open Government Data License v1.0)",
+        "delta": {
+            "upserts": delta.upserts.len(),
+            "deletes": delta.deletes.len(),
+            "unchanged": delta.unchanged,
+            "hadPrevious": args.prev.is_some(),
+        },
     });
     fs::write(
         args.out.join("manifest.json"),
