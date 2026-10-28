@@ -35,3 +35,21 @@ describe('CORS on a cache hit', () => {
     expect(res.headers.get('Vary')).toBe('Origin');
   });
 });
+
+describe('cache is populated CORS-free', () => {
+  it('stores the response without any origin allow header', async () => {
+    const put = vi.fn(() => Promise.resolve());
+    vi.stubGlobal('caches', { default: { match: () => Promise.resolve(undefined), put } });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(Response.json({ businessNm: '台灣積體電路製造股份有限公司', isUseInvoice: 'Y' }))),
+    );
+    const res = await get('https://a.example');
+    // The caller still gets its own CORS header…
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('https://a.example');
+    // …but the shared cache entry carries none, so it can't leak to others.
+    const stored = (put.mock.calls[0] as unknown[])[1] as Response;
+    expect(stored.headers.get('Access-Control-Allow-Origin')).toBeNull();
+    expect(stored.headers.get('Vary')).toBeNull();
+  });
+});

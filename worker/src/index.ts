@@ -35,9 +35,12 @@ export default {
 
     const ttl = Number(env.CACHE_TTL ?? '86400');
     const result = (await fromR2(ban, env)) ?? (await fromFia(ban)) ?? { found: false, ban };
-    const res = json(result, 200, cors, ttl);
+    // Cache the response CORS-free (the key is origin-independent and shared by
+    // all origins), then apply the caller's CORS per request. This keeps any
+    // one origin's allow header out of the shared cache at the source.
+    const res = json(result, 200, {}, ttl);
     ctx.waitUntil(cache.put(cacheKey, res.clone()));
-    return res;
+    return withCors(res, cors);
   },
 };
 
