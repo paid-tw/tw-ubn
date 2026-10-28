@@ -92,8 +92,9 @@ index 7 is `停業日期`.
 
 ## Published artifacts
 
-See `pipeline/build.sh`. `manifest.json` records `dataDate`, `rows`, `shards`
-(default 8192), and `hash` (`fnv1a-32`) so clients shard identically.
+See `crates/ubn-build` (`src/main.rs`). `manifest.json` records `dataDate`,
+`rows`, `shards` (default 8192), and `hash` (`fnv1a-32`) so clients shard
+identically.
 
 `shards/<n>.json` is a JSON array of `{ban, name, address, useInvoice, status}`.
 `status` is `"active"` or `"suspended"`. Shards built before that field existed

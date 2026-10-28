@@ -4,7 +4,8 @@
  * The published dataset is split into N static JSON shards so a single lookup
  * is one cache-friendly request. The bucket is derived from the UBN with a
  * 32-bit FNV-1a hash (portable, no deps) so the client and the build pipeline
- * agree exactly. `pipeline/shard.mjs` MUST keep an identical implementation.
+ * agree exactly. `crates/ubn-core` (`shard_of`) and the worker copies MUST keep
+ * an identical implementation; shared test vectors guard against drift.
  *
  * The shard count lives in the published manifest.json ("shards"); a client
  * should read it rather than hard-coding, but 8192 is the default.
