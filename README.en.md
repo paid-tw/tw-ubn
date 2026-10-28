@@ -142,6 +142,18 @@ cd client && pnpm install && pnpm test  # TS client (vitest) + pnpm build (tsc)
 The Rust core and the TS client re-implement the same ~3 functions; shared test
 vectors (see `client/src/__tests__`) keep them from drifting.
 
+## Releasing the client (npm)
+
+`@paid-tw/ubn` (`client/`) publishes on a git tag: push `ubn-vX.Y.Z` and the
+[release workflow](.github/workflows/release.yml) tests, builds, and publishes
+via **npm OIDC trusted publishing (no token, with provenance)**. First configure
+the package's trusted publisher on npmjs to this repo's `release.yml`.
+
+```bash
+cd client && npm version 0.1.0   # or edit package.json
+git tag ubn-v0.1.0 && git push origin ubn-v0.1.0
+```
+
 ## License
 
 Source code: MIT. See [`LICENSE`](LICENSE).
