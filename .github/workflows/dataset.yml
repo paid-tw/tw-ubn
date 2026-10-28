@@ -68,7 +68,7 @@ jobs:
             ("Delta " + (.delta | tostring) + ".")
           ' dist/manifest.json > dist/release-notes.md
           ASSETS="dist/ubn.ndjson.gz dist/ubn.sqlite dist/shards.tar.gz dist/manifest.json
-                  dist/state.tsv.gz dist/d1/schema.sql dist/d1/delta.sql dist/changed-shards.txt"
+                  dist/state.tsv.gz dist/d1/schema.sql dist/d1/migrate.sql dist/d1/delta.sql dist/changed-shards.txt"
           if ! gh release create "${{ steps.m.outputs.tag }}" $ASSETS \
                 --title "Dataset ${{ steps.m.outputs.date }}" \
                 --notes-file dist/release-notes.md; then
