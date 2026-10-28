@@ -57,16 +57,16 @@ async function resolveShardsDir(
   if (opts.version !== undefined) {
     return opts.version ? `${base}/${opts.version}/shards` : `${base}/shards`;
   }
-  try {
-    const res = await doFetch(`${base}/latest.json`, { signal });
-    if (res.ok) {
-      const { latest } = (await res.json()) as { latest?: string };
-      if (latest) return `${base}/${latest.replace(/^\/|\/$/g, '')}/shards`;
-    }
-  } catch {
-    /* fall through to the flat layout */
+  const res = await doFetch(`${base}/latest.json`, { signal });
+  if (res.ok) {
+    const { latest } = (await res.json()) as { latest?: string };
+    return latest ? `${base}/${latest.replace(/^\/|\/$/g, '')}/shards` : `${base}/shards`;
   }
-  return `${base}/shards`;
+  // Only an absent pointer (404) means the legacy flat layout. Any other status
+  // is an outage: propagate it so the caller sees an error, not a false "not
+  // found" (returning null here would mask the outage as a missing record).
+  if (res.status === 404) return `${base}/shards`;
+  throw new Error(`tw-ubn: latest.json resolution failed (HTTP ${res.status})`);
 }
 
 export class InvalidUBNError extends Error {

@@ -103,12 +103,19 @@ describe('lookupVAT versioned shard path', () => {
     expect(rec?.name).toBe('台積電');
   });
 
-  it('falls back to flat shards when latest.json is absent', async () => {
+  it('falls back to flat shards when latest.json is absent (404)', async () => {
     const rec = await lookupVAT('22099131', {
       baseUrl: 'https://cdn.test',
       shards: 256,
       fetchImpl: routed({ [`/shards/${bucket}.json`]: rows }),
     });
     expect(rec?.name).toBe('台積電');
+  });
+
+  it('propagates a latest.json outage instead of reporting not-found', async () => {
+    const failing = (async () => new Response('err', { status: 503 })) as typeof fetch;
+    await expect(
+      lookupVAT('22099131', { baseUrl: 'https://cdn.test', shards: 256, fetchImpl: failing }),
+    ).rejects.toThrow(/HTTP 503/);
   });
 });
