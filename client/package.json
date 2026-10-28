@@ -1,6 +1,6 @@
 {
   "name": "@paid-tw/ubn",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Taiwan business registry (統一編號) open dataset + a tiny checkout VAT-to-title lookup client",
   "license": "MIT",
   "type": "module",
@@ -20,9 +20,16 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
-  "engines": { "node": ">=18" },
-  "publishConfig": { "access": "public", "provenance": true },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
@@ -30,7 +37,15 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "prepublishOnly": "pnpm build"
   },
-  "keywords": ["taiwan", "統一編號", "ubn", "ban", "vat", "einvoice", "open-data"],
+  "keywords": [
+    "taiwan",
+    "統一編號",
+    "ubn",
+    "ban",
+    "vat",
+    "einvoice",
+    "open-data"
+  ],
   "devDependencies": {
     "typescript": "^5.6.0",
     "vitest": "^2.1.0"
