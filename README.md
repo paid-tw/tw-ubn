@@ -129,6 +129,18 @@ cd client && pnpm install && pnpm test  # TS 客戶端（vitest）+ pnpm build�
 Rust core 與 TS 客戶端各自實作同樣的 ~3 個函式；共用的測試向量（見
 `client/src/__tests__`）確保兩邊不會走鐘。
 
+## 發行客戶端（npm）
+
+`@paid-tw/ubn`（`client/`）以 git tag 觸發發行：推一個 `ubn-vX.Y.Z` tag，
+[release workflow](.github/workflows/release.yml) 會測試、建置並以 **npm OIDC
+trusted publishing（免 token、附 provenance）** 發佈。首次請先在 npmjs 上把該套件
+的 trusted publisher 設為本 repo 的 `release.yml`。
+
+```bash
+cd client && npm version 0.1.0   # 或手動改 package.json
+git tag ubn-v0.1.0 && git push origin ubn-v0.1.0
+```
+
 ## 授權
 
 原始碼：MIT。見 [`LICENSE`](LICENSE)。

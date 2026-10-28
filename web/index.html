@@ -22,9 +22,37 @@
     <div id="out" class="out muted">等待輸入…</div>
 
     <script type="module">
-      // Point this at your CDN (R2 behind Cloudflare). Shards live at <base>/shards/<n>.json
+      // Point this at your CDN (R2 behind Cloudflare). Shards are published under
+      // a versioned prefix (v/<date>/shards/<n>.json) named by latest.json.
       const BASE_URL = 'https://ubn.example.com';
       const SHARDS = 8192;
+
+      // Resolve the current version (latest.json is tiny and edge-cached) and
+      // cache the success for the page's lifetime. Give it its own timeout, only
+      // treat a 404 as the legacy flat layout, and drop the cache on failure so
+      // a transient outage doesn't wedge every later lookup.
+      let shardsDirPromise;
+      function shardsDir() {
+        if (!shardsDirPromise) {
+          const ctrl = new AbortController();
+          const t = setTimeout(() => ctrl.abort(), 2000);
+          shardsDirPromise = fetch(`${BASE_URL}/latest.json`, { signal: ctrl.signal })
+            .then(async (r) => {
+              if (r.ok) {
+                const j = await r.json();
+                return j && j.latest ? `${BASE_URL}/${j.latest}/shards` : `${BASE_URL}/shards`;
+              }
+              if (r.status === 404) return `${BASE_URL}/shards`;
+              throw new Error(`latest.json ${r.status}`);
+            })
+            .finally(() => clearTimeout(t))
+            .catch((e) => {
+              shardsDirPromise = undefined; // allow a later lookup to retry
+              throw e;
+            });
+        }
+        return shardsDirPromise;
+      }
 
       const WEIGHTS = [1, 2, 1, 2, 1, 2, 4, 1];
       function validateUBN(ban) {
@@ -58,7 +86,8 @@
         try {
           const ctrl = new AbortController();
           const t = setTimeout(() => ctrl.abort(), 2000);
-          const res = await fetch(`${BASE_URL}/shards/${shardOf(ban)}.json`, { signal: ctrl.signal });
+          const dir = await shardsDir();
+          const res = await fetch(`${dir}/${shardOf(ban)}.json`, { signal: ctrl.signal });
           clearTimeout(t);
           const rows = await res.json();
           const rec = rows.find((r) => r.ban === ban);

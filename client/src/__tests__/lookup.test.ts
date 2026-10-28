@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { lookupVAT } from '../lookup.js';
+import { shardOf } from '../shard.js';
 
 function jsonFetch(body: unknown): typeof fetch {
   return (async () =>
@@ -7,6 +8,20 @@ function jsonFetch(body: unknown): typeof fetch {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     })) as typeof fetch;
+}
+
+/** Fetch mock that answers by URL suffix; anything unmatched is a 404. */
+function routed(routes: Record<string, unknown>): typeof fetch {
+  return (async (input: Parameters<typeof fetch>[0]) => {
+    const url = String(input);
+    const key = Object.keys(routes).find((k) => url.endsWith(k));
+    return key
+      ? new Response(JSON.stringify(routes[key]), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      : new Response('not found', { status: 404 });
+  }) as typeof fetch;
 }
 
 describe('lookupVAT shard records', () => {
@@ -59,5 +74,48 @@ describe('lookupVAT shard records', () => {
     expect(rec?.name).toBe('台積電');
     expect(rec?.useInvoice).toBe(true);
     expect(rec?.status).toBeUndefined();
+  });
+});
+
+describe('lookupVAT versioned shard path', () => {
+  const rows = [{ ban: '22099131', name: '台積電', useInvoice: true, status: 'active' }];
+  const bucket = shardOf('22099131', 256);
+
+  it('resolves latest.json and reads the versioned shard', async () => {
+    const rec = await lookupVAT('22099131', {
+      baseUrl: 'https://cdn.test',
+      shards: 256,
+      fetchImpl: routed({
+        '/latest.json': { latest: 'v/20261028' },
+        [`/v/20261028/shards/${bucket}.json`]: rows,
+      }),
+    });
+    expect(rec?.name).toBe('台積電');
+  });
+
+  it('honors an explicit version and skips latest.json', async () => {
+    const rec = await lookupVAT('22099131', {
+      baseUrl: 'https://cdn.test',
+      shards: 256,
+      version: 'v/20261028',
+      fetchImpl: routed({ [`/v/20261028/shards/${bucket}.json`]: rows }),
+    });
+    expect(rec?.name).toBe('台積電');
+  });
+
+  it('falls back to flat shards when latest.json is absent (404)', async () => {
+    const rec = await lookupVAT('22099131', {
+      baseUrl: 'https://cdn.test',
+      shards: 256,
+      fetchImpl: routed({ [`/shards/${bucket}.json`]: rows }),
+    });
+    expect(rec?.name).toBe('台積電');
+  });
+
+  it('propagates a latest.json outage instead of reporting not-found', async () => {
+    const failing = (async () => new Response('err', { status: 503 })) as typeof fetch;
+    await expect(
+      lookupVAT('22099131', { baseUrl: 'https://cdn.test', shards: 256, fetchImpl: failing }),
+    ).rejects.toThrow(/HTTP 503/);
   });
 });

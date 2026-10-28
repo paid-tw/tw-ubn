@@ -2,6 +2,7 @@
 name = "ubn-core"
 version = "0.1.0"
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Core logic for Taiwan Unified Business Numbers (統一編號): checksum, shard hash, ROC date."

@@ -2,7 +2,9 @@ name: Build dataset
 
 on:
   schedule:
-    - cron: '30 20 * * *' # daily, 20:30 UTC (~04:30 Asia/Taipei next day)
+    # 23:30 UTC (~07:30 Asia/Taipei). MOF re-publishes the active zip ~21:00 UTC,
+    # so running later avoids picking up the previous day's extract.
+    - cron: '30 23 * * *'
   workflow_dispatch: {} # manual trigger + keeps the schedule from auto-pausing
 
 permissions:
@@ -84,14 +86,17 @@ jobs:
             --title "latest" --notes "rolling state for incremental diffs"
 
       # Apply only the delta to D1 — the whole point of the incremental build.
-      # Skipped unless the D1 secrets are set.
+      # Gating lives in the script: a step-level `if` cannot see env vars the
+      # step itself defines, so it would never run.
       - name: Apply D1 delta
-        if: ${{ env.CLOUDFLARE_API_TOKEN != '' && env.D1_DATABASE != '' }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           D1_DATABASE: ${{ secrets.D1_DATABASE }}
         run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$D1_DATABASE" ]; then
+            echo "D1 secrets not set; skipping D1 apply"; exit 0
+          fi
           npx -y wrangler@4 d1 execute "$D1_DATABASE" --remote --file dist/d1/schema.sql -y
           # Upgrade pre-existing databases: add any new columns, ignoring the
           # duplicate-column error a freshly-created table raises.
@@ -109,13 +114,15 @@ jobs:
       # the Cloudflare CDN. R2 writes are cheap, so this uploads the full set;
       # changed-shards.txt is published for anyone serving from a stable path.
       - name: Sync shards to R2
-        if: ${{ env.R2_ACCESS_KEY_ID != '' }}
         env:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
         run: |
+          if [ -z "$R2_ACCESS_KEY_ID" ]; then
+            echo "R2 secrets not set; skipping R2 sync"; exit 0
+          fi
           export AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
           export AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
           EP="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
