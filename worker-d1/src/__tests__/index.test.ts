@@ -43,4 +43,14 @@ describe('worker-d1 before the dataset is loaded', () => {
     expect(res.headers.get('Cache-Control')).toBe('no-store');
     expect(put).not.toHaveBeenCalled();
   });
+
+  it('does not 1101 when D1 is empty and the FIA fallback is unreachable', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.reject(new Error('network error'))),
+    );
+    const res = await worker.fetch(new Request('https://w/v1/vat/22099131'), env, ctx);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ found: false, ban: '22099131' });
+  });
 });

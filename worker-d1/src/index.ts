@@ -88,7 +88,17 @@ async function fromD1(ban: string, env: Env): Promise<UBNResult | null> {
 }
 
 async function fromFia(ban: string): Promise<UBNResult | null> {
-  const res = await fetch(`${FIA_API}/${ban}`);
+  let res: Response;
+  try {
+    res = await fetch(`${FIA_API}/${ban}`);
+  } catch (e) {
+    // FIA unreachable: return null (not a throw) so the handler answers
+    // {found:false} instead of letting it bubble up as a Cloudflare 1101.
+    // This matters most on a fresh deploy, where D1 is empty and FIA is the
+    // only source — a transient FIA blip must not take the whole worker down.
+    console.error('fia lookup failed', e);
+    return null;
+  }
   if (res.status === 404) return { found: false, ban };
   if (!res.ok) return null;
   return normalizeFia(ban, (await res.json()) as Record<string, unknown>);
