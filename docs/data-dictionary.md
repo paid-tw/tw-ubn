@@ -97,6 +97,14 @@ See `crates/ubn-build` (`src/main.rs`). `manifest.json` records `dataDate`,
 identically.
 
 `shards/<n>.json` is a JSON array of `{ban, name, address, useInvoice, status}`.
+
+For D1, the build also emits `d1/schema.sql` (create), `d1/migrate.sql`
+(idempotent `ADD COLUMN` for older tables), `d1/delta.sql` (the day's upserts +
+deletes vs `--prev`), and `d1/full.sql` (a `DELETE` + all-rows reload). The
+workflow applies the delta only when D1's own checkpoint — the sha256 of the
+`state.tsv` it last reflected, stored separately from dataset publication —
+matches the state the build diffed from; otherwise (a fresh or out-of-sync D1)
+it applies `full.sql` so unchanged rows are never left missing.
 `status` is `"active"` or `"suspended"`. Shards built before that field existed
 omit it; clients must treat a missing `status` as unknown, not as active.
 Adding the field is backward compatible for readers that ignore unknown JSON

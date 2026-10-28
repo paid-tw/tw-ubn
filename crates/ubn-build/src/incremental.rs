@@ -166,6 +166,22 @@ pub fn write_delta_sql(records: &[Record], d: &Diff, path: &Path) -> Result<()> 
     Ok(())
 }
 
+/// Emit a full reload: clear the table, then one INSERT per row. Used to
+/// bootstrap a D1 that has no applied snapshot or has fallen out of sync with
+/// the shared dataset checkpoint, where the incremental delta would otherwise
+/// leave unchanged rows missing. `DELETE FROM ubn` first makes it a clean
+/// replace regardless of prior contents (removing rows no longer in the data);
+/// plain INSERTs then load every current row. No transaction wrapper — D1's
+/// import manages that.
+pub fn write_full_sql(records: &[Record], path: &Path) -> Result<()> {
+    let mut w = BufWriter::new(File::create(path)?);
+    writeln!(w, "DELETE FROM ubn;")?;
+    for r in records {
+        writeln!(w, "INSERT INTO ubn ({COLUMNS}) VALUES {};", values(r))?;
+    }
+    Ok(())
+}
+
 /// Persist the current full state for the next run to diff against.
 pub fn write_state(records: &[Record], hashes: &[u64], path: &Path) -> Result<()> {
     let mut w = BufWriter::new(File::create(path)?);
@@ -263,5 +279,19 @@ mod tests {
         assert!(sql.contains("suspension_date=excluded.suspension_date"));
         assert!(sql.contains("DELETE FROM ubn WHERE ban IN ('10000009');"));
         assert!(!sql.contains("BEGIN")); // D1 import manages the transaction
+    }
+
+    #[test]
+    fn full_sql_clears_then_inserts_every_row() {
+        let recs = vec![rec("10000001", "甲商行"), rec("10000002", "乙商行")];
+        let dir = std::env::temp_dir().join(format!("ubn-full-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("full.sql");
+        write_full_sql(&recs, &p).unwrap();
+        let sql = std::fs::read_to_string(&p).unwrap();
+        assert!(sql.starts_with("DELETE FROM ubn;")); // clean replace
+        assert_eq!(sql.matches("INSERT INTO ubn").count(), 2);
+        assert!(!sql.contains("ON CONFLICT")); // plain inserts after the clear
+        assert!(!sql.contains("BEGIN"));
     }
 }
