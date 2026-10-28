@@ -48,6 +48,7 @@ export default {
       if (hit) return withCors(hit, cors);
 
       const rows = await searchByName(name, limit, env);
+      if (!rows) return json({ query: name, count: 0, results: [] }, 200, cors);
       const res = json({ query: name, count: rows.length, results: rows }, 200, cors, ttl);
       ctx.waitUntil(cache.put(key, res.clone()));
       return res;
@@ -57,12 +58,22 @@ export default {
   },
 };
 
+/**
+ * Null on a miss *or* a D1 error (e.g. no `ubn` table before the first load),
+ * so the caller falls back to FIA instead of throwing a 1101.
+ */
 async function fromD1(ban: string, env: Env): Promise<UBNResult | null> {
-  const row = await env.UBN_DB.prepare(
-    'SELECT ban, name, address, use_invoice, status, setup_date_iso FROM ubn WHERE ban = ?',
-  )
-    .bind(ban)
-    .first<Record<string, unknown>>();
+  let row: Record<string, unknown> | null;
+  try {
+    row = await env.UBN_DB.prepare(
+      'SELECT ban, name, address, use_invoice, status, setup_date_iso FROM ubn WHERE ban = ?',
+    )
+      .bind(ban)
+      .first<Record<string, unknown>>();
+  } catch (e) {
+    console.error('d1 lookup failed; falling back to FIA', e);
+    return null;
+  }
   if (!row) return null;
   return {
     found: true,
@@ -90,12 +101,18 @@ async function fromFia(ban: string): Promise<UBNResult | null> {
  */
 async function searchByName(name: string, limit: number, env: Env) {
   const upper = name + '￿';
-  const { results } = await env.UBN_DB.prepare(
-    'SELECT ban, name, address, status FROM ubn WHERE name >= ? AND name < ? ORDER BY name LIMIT ?',
-  )
-    .bind(name, upper, limit)
-    .all<Record<string, unknown>>();
-  return results ?? [];
+  try {
+    const { results } = await env.UBN_DB.prepare(
+      'SELECT ban, name, address, status FROM ubn WHERE name >= ? AND name < ? ORDER BY name LIMIT ?',
+    )
+      .bind(name, upper, limit)
+      .all<Record<string, unknown>>();
+    return results ?? [];
+  } catch (e) {
+    // null (not []) so the handler skips caching a transient failure.
+    console.error('d1 search failed', e);
+    return null;
+  }
 }
 
 function corsHeaders(origin: string, allowed: string): Record<string, string> {
