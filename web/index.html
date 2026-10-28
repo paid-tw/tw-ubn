@@ -22,9 +22,21 @@
     <div id="out" class="out muted">等待輸入…</div>
 
     <script type="module">
-      // Point this at your CDN (R2 behind Cloudflare). Shards live at <base>/shards/<n>.json
+      // Point this at your CDN (R2 behind Cloudflare). Shards are published under
+      // a versioned prefix (v/<date>/shards/<n>.json) named by latest.json.
       const BASE_URL = 'https://ubn.example.com';
       const SHARDS = 8192;
+
+      // Resolve the current version once (latest.json is tiny and edge-cached),
+      // falling back to a flat /shards/ layout. Cached for the page's lifetime.
+      let shardsDirPromise;
+      function shardsDir() {
+        shardsDirPromise ??= fetch(`${BASE_URL}/latest.json`)
+          .then((r) => (r.ok ? r.json() : null))
+          .then((j) => (j && j.latest ? `${BASE_URL}/${j.latest}/shards` : `${BASE_URL}/shards`))
+          .catch(() => `${BASE_URL}/shards`);
+        return shardsDirPromise;
+      }
 
       const WEIGHTS = [1, 2, 1, 2, 1, 2, 4, 1];
       function validateUBN(ban) {
@@ -58,7 +70,8 @@
         try {
           const ctrl = new AbortController();
           const t = setTimeout(() => ctrl.abort(), 2000);
-          const res = await fetch(`${BASE_URL}/shards/${shardOf(ban)}.json`, { signal: ctrl.signal });
+          const dir = await shardsDir();
+          const res = await fetch(`${dir}/${shardOf(ban)}.json`, { signal: ctrl.signal });
           clearTimeout(t);
           const rows = await res.json();
           const rec = rows.find((r) => r.ban === ban);

@@ -32,6 +32,41 @@ export interface LookupOptions {
   timeoutMs?: number;
   /** Inject a fetch implementation (tests / non-browser runtimes). */
   fetchImpl?: typeof fetch;
+  /**
+   * Version prefix of the published shards (e.g. `"v/20261028"`). When omitted,
+   * the client reads `<baseUrl>/latest.json` to discover it. Set this to pin a
+   * version, or to `""` to read shards flat at `<baseUrl>/shards/` (e.g. when
+   * `baseUrl` already points inside a version).
+   */
+  version?: string;
+}
+
+/**
+ * Resolve the directory that holds the shards. The dataset workflow publishes
+ * them under a versioned, immutable prefix (`v/<date>/shards/`) with a short-TTL
+ * `latest.json` = `{"latest":"v/<date>"}` pointer, so the client must resolve
+ * that pointer rather than assume a flat `/shards/`. Falls back to flat when
+ * `latest.json` is absent or `version` is given explicitly.
+ */
+async function resolveShardsDir(
+  opts: LookupOptions,
+  doFetch: typeof fetch,
+  signal: AbortSignal,
+): Promise<string> {
+  const base = opts.baseUrl.replace(/\/$/, '');
+  if (opts.version !== undefined) {
+    return opts.version ? `${base}/${opts.version}/shards` : `${base}/shards`;
+  }
+  try {
+    const res = await doFetch(`${base}/latest.json`, { signal });
+    if (res.ok) {
+      const { latest } = (await res.json()) as { latest?: string };
+      if (latest) return `${base}/${latest.replace(/^\/|\/$/g, '')}/shards`;
+    }
+  } catch {
+    /* fall through to the flat layout */
+  }
+  return `${base}/shards`;
 }
 
 export class InvalidUBNError extends Error {
@@ -61,8 +96,8 @@ export async function lookupVAT(ban: string, opts: LookupOptions): Promise<UBNRe
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 2000);
   try {
-    const url = `${opts.baseUrl.replace(/\/$/, '')}/shards/${bucket}.json`;
-    const res = await doFetch(url, { signal: controller.signal });
+    const dir = await resolveShardsDir(opts, doFetch, controller.signal);
+    const res = await doFetch(`${dir}/${bucket}.json`, { signal: controller.signal });
     if (!res.ok) return null;
     const rows = (await res.json()) as UBNRecord[];
     return rows.find((r) => r.ban === ban) ?? null;
