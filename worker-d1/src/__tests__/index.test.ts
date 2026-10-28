@@ -103,3 +103,28 @@ describe('worker-d1 before the dataset is loaded', () => {
     expect(put).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('CORS on a cache hit', () => {
+  // A response cached by an allowed origin still carries its CORS headers.
+  const cachedFor = (origin: string) =>
+    new Response('{"found":true}', {
+      headers: { 'Access-Control-Allow-Origin': origin, Vary: 'Origin' },
+    });
+  const allowlist: Env = { UBN_DB: noTableDb, ALLOWED_ORIGINS: 'https://a.example,https://b.example' };
+  const get = (origin: string) =>
+    worker.fetch(new Request('https://w/v1/vat/22099131', { headers: { Origin: origin } }), allowlist, ctx);
+
+  it("does not hand a disallowed origin another origin's allow header", async () => {
+    vi.stubGlobal('caches', { default: { match: () => Promise.resolve(cachedFor('https://a.example')), put } });
+    const res = await get('https://evil.example');
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBeNull();
+    expect(res.headers.get('Vary')).toBeNull();
+  });
+
+  it('rewrites the allow header for a different allowed origin', async () => {
+    vi.stubGlobal('caches', { default: { match: () => Promise.resolve(cachedFor('https://a.example')), put } });
+    const res = await get('https://b.example');
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('https://b.example');
+    expect(res.headers.get('Vary')).toBe('Origin');
+  });
+});

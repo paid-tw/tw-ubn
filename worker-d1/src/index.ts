@@ -173,6 +173,10 @@ function corsHeaders(origin: string, allowed: string): Record<string, string> {
 
 function withCors(res: Response, cors: Record<string, string>): Response {
   const r = new Response(res.body, res);
+  // A cached response carries the CORS headers of whoever populated it; drop
+  // them so a disallowed origin doesn't get another origin's allow header.
+  r.headers.delete('Access-Control-Allow-Origin');
+  r.headers.delete('Vary');
   for (const [k, v] of Object.entries(cors)) r.headers.set(k, v);
   return r;
 }
