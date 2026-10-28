@@ -50,9 +50,11 @@ export default {
           cacheable = false;
         }
       }
-      const res = json(result, 200, cors, cacheable ? ttl : 0);
+      // Cache CORS-free (the key is shared by all origins); apply the caller's
+      // CORS per request so no single origin's allow header enters the cache.
+      const res = json(result, 200, {}, cacheable ? ttl : 0);
       if (cacheable) ctx.waitUntil(cache.put(key, res.clone()));
-      return res;
+      return withCors(res, cors);
     }
 
     // --- name prefix search (D1 only) ------------------------------------
@@ -66,10 +68,10 @@ export default {
       if (hit) return withCors(hit, cors);
 
       const rows = await searchByName(name, limit, env);
-      if (!rows) return json({ query: name, count: 0, results: [] }, 200, cors);
-      const res = json({ query: name, count: rows.length, results: rows }, 200, cors, ttl);
+      if (!rows) return withCors(json({ query: name, count: 0, results: [] }, 200, {}), cors);
+      const res = json({ query: name, count: rows.length, results: rows }, 200, {}, ttl);
       ctx.waitUntil(cache.put(key, res.clone()));
-      return res;
+      return withCors(res, cors);
     }
 
     return json({ routes: ['/v1/vat/:ban', '/v1/search?name=&limit='] }, 404, cors);
@@ -173,6 +175,10 @@ function corsHeaders(origin: string, allowed: string): Record<string, string> {
 
 function withCors(res: Response, cors: Record<string, string>): Response {
   const r = new Response(res.body, res);
+  // A cached response carries the CORS headers of whoever populated it; drop
+  // them so a disallowed origin doesn't get another origin's allow header.
+  r.headers.delete('Access-Control-Allow-Origin');
+  r.headers.delete('Vary');
   for (const [k, v] of Object.entries(cors)) r.headers.set(k, v);
   return r;
 }
