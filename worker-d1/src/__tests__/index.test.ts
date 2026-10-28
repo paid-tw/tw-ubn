@@ -128,3 +128,25 @@ describe('CORS on a cache hit', () => {
     expect(res.headers.get('Vary')).toBe('Origin');
   });
 });
+
+describe('cache is populated CORS-free', () => {
+  const allowlist: Env = { UBN_DB: noTableDb, ALLOWED_ORIGINS: 'https://a.example,https://b.example' };
+
+  it('stores the vat response without any origin allow header', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(Response.json({ businessNm: '台灣積體電路製造股份有限公司', isUseInvoice: 'Y' }))),
+    );
+    const res = await worker.fetch(
+      new Request('https://w/v1/vat/22099131', { headers: { Origin: 'https://a.example' } }),
+      allowlist,
+      ctx,
+    );
+    // The caller still gets its own CORS header…
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('https://a.example');
+    // …but the shared cache entry carries none, so it can't leak to others.
+    const stored = (put.mock.calls[0] as unknown[])[1] as Response;
+    expect(stored.headers.get('Access-Control-Allow-Origin')).toBeNull();
+    expect(stored.headers.get('Vary')).toBeNull();
+  });
+});
