@@ -13,6 +13,7 @@
 //!   d1/schema.sql       CREATE TABLE IF NOT EXISTS (apply once)
 //!   d1/migrate.sql      idempotent ADD COLUMN for pre-existing databases
 //!   d1/delta.sql        upserts + deletes vs --prev (apply daily to D1)
+//!   d1/full.sql         full reload (DELETE + all rows) to bootstrap a D1
 //!   changed-shards.txt  shard buckets touched by the delta (partial R2 sync)
 //!   manifest.json       data date, rows, shards, hash, OGDL attribution, delta counts
 //!
@@ -226,6 +227,7 @@ fn main() -> Result<()> {
     incremental::write_schema_sql(&args.out.join("d1/schema.sql"))?;
     incremental::write_migrate_sql(&args.out.join("d1/migrate.sql"))?;
     incremental::write_delta_sql(&records, &delta, &args.out.join("d1/delta.sql"))?;
+    incremental::write_full_sql(&records, &args.out.join("d1/full.sql"))?;
     incremental::write_changed_shards(
         &records,
         &delta,

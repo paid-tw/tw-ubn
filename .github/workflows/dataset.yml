@@ -69,8 +69,10 @@ jobs:
             ("FIA tax registry snapshot " + (.dataDate // "unknown") + ". rows=" + (.rows | tostring) + "."),
             ("Delta " + (.delta | tostring) + ".")
           ' dist/manifest.json > dist/release-notes.md
+          gzip -kf dist/d1/full.sql
           ASSETS="dist/ubn.ndjson.gz dist/ubn.sqlite dist/shards.tar.gz dist/manifest.json
-                  dist/state.tsv.gz dist/d1/schema.sql dist/d1/migrate.sql dist/d1/delta.sql dist/changed-shards.txt"
+                  dist/state.tsv.gz dist/d1/schema.sql dist/d1/migrate.sql dist/d1/delta.sql
+                  dist/d1/full.sql.gz dist/changed-shards.txt"
           if ! gh release create "${{ steps.m.outputs.tag }}" $ASSETS \
                 --title "Dataset ${{ steps.m.outputs.date }}" \
                 --notes-file dist/release-notes.md; then
@@ -90,6 +92,7 @@ jobs:
       # step itself defines, so it would never run.
       - name: Apply D1 delta
         env:
+          GH_TOKEN: ${{ github.token }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           D1_DATABASE: ${{ secrets.D1_DATABASE }}
@@ -104,11 +107,34 @@ jobs:
             [ -z "$stmt" ] && continue
             npx -y wrangler@4 d1 execute "$D1_DATABASE" --remote --command "$stmt" -y 2>/dev/null || true
           done < dist/d1/migrate.sql
-          if [ -s dist/d1/delta.sql ]; then
-            npx -y wrangler@4 d1 execute "$D1_DATABASE" --remote --file dist/d1/delta.sql -y
-          else
-            echo "no row changes today"
+          # D1 tracks its OWN applied checkpoint, kept separate from dataset
+          # publication: "<state-sha> <target-fingerprint>", where state-sha is
+          # the sha256 of the state.tsv it reflects and target-fingerprint is a
+          # sha256 of account/database (so the raw secrets are never published).
+          # The delta is valid only when BOTH match: the same target, at the
+          # state the build diffed FROM. A fresh/behind D1, or a changed target
+          # (e.g. D1_DATABASE repointed at a new database), forces a full reload
+          # so unchanged rows are never left missing.
+          TARGET=$(printf '%s/%s' "$CLOUDFLARE_ACCOUNT_ID" "$D1_DATABASE" | sha256sum | cut -d' ' -f1)
+          BASE=""
+          if [ -f prev/state.tsv ]; then BASE=$(sha256sum prev/state.tsv | cut -d' ' -f1); fi
+          CK_STATE=""; CK_TARGET=""
+          if gh release download data-latest --pattern d1-checkpoint.txt --dir d1ck 2>/dev/null; then
+            read -r CK_STATE CK_TARGET < d1ck/d1-checkpoint.txt || true
           fi
+          if [ -n "$BASE" ] && [ "$CK_STATE" = "$BASE" ] && [ "$CK_TARGET" = "$TARGET" ]; then
+            if [ -s dist/d1/delta.sql ]; then
+              npx -y wrangler@4 d1 execute "$D1_DATABASE" --remote --file dist/d1/delta.sql -y
+            else
+              echo "no row changes today"
+            fi
+          else
+            echo "D1 fresh/out-of-sync or target changed; full reload"
+            npx -y wrangler@4 d1 execute "$D1_DATABASE" --remote --file dist/d1/full.sql -y
+          fi
+          # Record the state D1 now reflects + the target it was applied to.
+          printf '%s %s\n' "$(sha256sum dist/state.tsv | cut -d' ' -f1)" "$TARGET" > d1-checkpoint.txt
+          gh release upload data-latest d1-checkpoint.txt --clobber
 
       # Shards -> R2 (the static serving origin), versioned + immutable, behind
       # the Cloudflare CDN. R2 writes are cheap, so this uploads the full set;
