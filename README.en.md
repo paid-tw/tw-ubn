@@ -25,7 +25,7 @@ is a single cache-friendly request to static data you host yourself.
            │
            ▼  ubn-build (Rust): normalize (ROC→ISO), merge + status flag
          dist/
-           ├─ shards/<n>.json   8192 per-UBN shards (ban → name/address/useInvoice)
+           ├─ shards/<n>.json   8192 per-UBN shards (ban → name/address/useInvoice/status)
            ├─ ubn.sqlite        full dataset, indexed on ban
            ├─ ubn.ndjson.gz     full dataset, one JSON object per line
            └─ manifest.json     data date, rows, shards, hash, license
@@ -38,7 +38,10 @@ is a single cache-friendly request to static data you host yourself.
   entity (companies *and* 商號), and carries the invoice title and the
   uniform-invoice flag — exactly what checkout needs. Updated daily.
 - Active-vs-suspended **status** comes from FIA itself (`BGMOPEN1` +
-  `BGMOPEN1X`), so GCIS is not needed for it.
+  `BGMOPEN1X`), so GCIS is not needed for it. Shard records include
+  `status` (`active` or `suspended`). Shards built before that field omit
+  it; a missing value means unknown, not active. The suspension date is on
+  the full dataset only, not on the checkout shard.
 - **GCIS** (company/business registration) is optional, per-record enrichment
   (e.g. responsible person); see [`docs/data-dictionary.md`](docs/data-dictionary.md)
   for why there is no usable GCIS bulk master.
@@ -141,12 +144,25 @@ vectors (see `client/src/__tests__`) keep them from drifting.
 
 ## License
 
-Source code: MIT. Data artifacts: derived from Taiwan government open data under
-the Open Government Data License v1.0 — redistribute with source + date
-attribution. See [`LICENSE`](LICENSE).
+Source code: MIT. See [`LICENSE`](LICENSE).
+
+The data artifacts are derived from open data released by
+**財政部財政資訊中心** under **政府資料開放授權條款－第1版** (Open Government
+Data License v1, <https://data.gov.tw/license>). The licence's exhibit says
+that omitting the attribution means no licence was granted:
+
+- Provider (提供機關／單位): 財政部財政資訊中心
+- Datasets: 全國營業(稅籍)登記資料集 and 全國營業(稅籍)登記(停業)資料集
+- Version: the extract date of that build, in `manifest.json` as `dataDate`
+  and `attribution.datasets[].version`
+
+此開放資料依政府資料開放授權條款 (Open Government Data License) 進行公眾釋出，使用者於遵守本條款各項規定之前提下，得利用之。
+
+政府資料開放授權條款：<https://data.gov.tw/license>
 
 ## Disclaimer
 
 Data is provided as-is from government sources and may lag reality by up to a
-day (and excludes suspended/closed entities in the primary file). Verify
-anything legally or financially significant against the official source.
+day. Suspended rows are included with `status: "suspended"` (the suspension
+date is on the full dataset only). Verify anything legally or financially
+significant against the official source.

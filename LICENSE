@@ -24,8 +24,22 @@ SOFTWARE.
 
 NOTE: This MIT license covers the SOURCE CODE in this repository only.
 
-The published DATA artifacts are derived from Taiwan government open data
-(財政部財政資訊中心 全國營業(稅籍)登記資料集; 經濟部商業司 公司登記資料) released
-under the Open Government Data License v1.0 (政府資料開放授權條款-第1版). Reuse
-and redistribution of the data are permitted provided the source and the
-extraction date are attributed. See docs/data-dictionary.md.
+The published DATA artifacts are derived from open data released by
+財政部財政資訊中心 under 政府資料開放授權條款－第1版 (Open Government Data
+License v1, https://data.gov.tw/license). Failing to attach the 顯名聲明
+below means the licence was not granted.
+
+提供機關／單位：財政部財政資訊中心
+開放資料：
+  - 全國營業(稅籍)登記資料集（https://data.gov.tw/dataset/9400，BGMOPEN1.zip）
+  - 全國營業(稅籍)登記(停業)資料集（https://data.gov.tw/dataset/75140，BGMOPEN1X.csv）
+版本：each build's extract date, recorded in manifest.json as dataDate and
+attribution.datasets[].version (for example 28-OCT-26).
+
+此開放資料依政府資料開放授權條款 (Open Government Data License) 進行公眾釋出，使用者於遵守本條款各項規定之前提下，得利用之。
+
+政府資料開放授權條款：https://data.gov.tw/license
+
+See docs/data-dictionary.md. Per-record GCIS responses, when used, are a
+separate government source under the same licence and need their own
+attribution; this repository does not republish a GCIS dump.

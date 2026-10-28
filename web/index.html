@@ -11,6 +11,8 @@
       .out { margin-top: 1rem; padding: 0.8rem 1rem; border-radius: 8px; background: color-mix(in srgb, Canvas 92%, CanvasText); }
       .muted { opacity: 0.6; }
       code { font-family: ui-monospace, monospace; }
+      footer { margin-top: 2.5rem; font-size: 0.85rem; }
+      footer a { color: inherit; }
     </style>
   </head>
   <body>
@@ -73,5 +75,10 @@
         else show('等待輸入…', true);
       });
     </script>
+    <footer class="muted">
+      <p>資料來源：財政部財政資訊中心，全國營業(稅籍)登記資料集、全國營業(稅籍)登記(停業)資料集（版本為各次建置的擷取日期，見 manifest.json 的 <code>dataDate</code>）。</p>
+      <p>此開放資料依政府資料開放授權條款 (Open Government Data License) 進行公眾釋出，使用者於遵守本條款各項規定之前提下，得利用之。</p>
+      <p>政府資料開放授權條款：<a href="https://data.gov.tw/license">https://data.gov.tw/license</a></p>
+    </footer>
   </body>
 </html>

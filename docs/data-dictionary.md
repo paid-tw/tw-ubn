@@ -37,9 +37,11 @@ covers name / invoice flag / industry / address / status. GCIS responsible-perso
 enrichment is a possible **phase 3** (concatenate the monthly 設立 registers), not
 required for the checkout title lookup.
 
-Both government sources are released under the **Open Government Data License
-v1.0 (政府資料開放授權條款-第1版)**: redistribution is permitted with attribution
-of the source and extraction date.
+Both government sources are released by their providers under the
+**政府資料開放授權條款－第1版** (Open Government Data License v1,
+<https://data.gov.tw/license>). The FIA bulk files this repository republishes
+must carry the 顯名聲明 described under [Licence](#licence). Omitting it means
+the licence was not granted.
 
 ## FIA tax-registry columns (BGMOPEN1.csv)
 
@@ -58,6 +60,30 @@ UTF-8, no BOM. Original header → field name used in this repo:
 | 行業代號, 名稱 | `industry_code`, `industry_name` | Primary industry |
 | 行業代號1..3, 名稱1..3 | `industry_code1..3`, `industry_name1..3` | Additional industries |
 
+`ubn-build` maps those columns **by header name, in any order**. The header
+must be exactly this set. An extra, missing, duplicate, or empty column name
+aborts the build — a positional read will not be guessed. Both files start
+with a sentinel row (the extract date in `營業地址`, empty 統一編號), which
+is recorded as `dataDate` and dropped.
+
+### Suspended file (`BGMOPEN1X.csv`)
+
+Same columns as `BGMOPEN1`, plus `停業日期` (ROC `YYYMMDD`, occasionally
+blank). In the upstream file it sits between `組織別名稱` and `使用統一發票`;
+the parser does not depend on that position. The expected header is the
+active set plus `停業日期`, and any other shape is an error.
+
+| Published field | Notes |
+| --- | --- |
+| `suspension_date` | Raw ROC date, or null when the cell is blank. Absent as a value on active rows (the column is not in `BGMOPEN1`). |
+| `suspension_date_iso` | `roc_to_iso(suspension_date)`; null when the raw value is missing or not a real month/day. |
+| `status` | `suspended` for this file, `active` for `BGMOPEN1`. Stored on the full dataset and on each shard record. |
+
+On the 2026-10-27 extract (sentinel `28-OCT-26`) the suspended file has
+114,612 data rows, of which **94,999** have `使用統一發票=Y` and 19,613 have
+`N`. A positional parse of that file reported `Y` for **0** rows, because
+index 7 is `停業日期`.
+
 ## GCIS company fields used for validation
 
 `Company_Name`, `Company_Status_Desc` (e.g. 核准設立 / 解散 / 撤銷),
@@ -68,6 +94,34 @@ UTF-8, no BOM. Original header → field name used in this repo:
 
 See `pipeline/build.sh`. `manifest.json` records `dataDate`, `rows`, `shards`
 (default 8192), and `hash` (`fnv1a-32`) so clients shard identically.
+
+`shards/<n>.json` is a JSON array of `{ban, name, address, useInvoice, status}`.
+`status` is `"active"` or `"suspended"`. Shards built before that field existed
+omit it; clients must treat a missing `status` as unknown, not as active.
+Adding the field is backward compatible for readers that ignore unknown JSON
+keys. `suspension_date` is not copied onto shards; it is only on
+`ubn.ndjson.gz` and `ubn.sqlite`.
+
+## Licence
+
+`manifest.json` (written by `ubn-build`) is the per-build copy of the
+Open Government Data License exhibit. `attribution` contains:
+
+1. `exhibit` — 提供機關／單位, year, and dataset name plus version. The
+   version is the CSV sentinel date (for example `28-OCT-26`); these files
+   are replaced daily and have no separate version number. `dataDate` is the
+   active file's sentinel; `suspendedDataDate` is the suspended file's.
+2. `statement` — 「此開放資料依政府資料開放授權條款 (Open Government Data License) 進行公眾釋出，使用者於遵守本條款各項規定之前提下，得利用之。」
+3. `licenseUrl` — <https://data.gov.tw/license>
+
+| Dataset | Provider | Catalog | File |
+| --- | --- | --- | --- |
+| 全國營業(稅籍)登記資料集 | 財政部財政資訊中心 | <https://data.gov.tw/dataset/9400> | `BGMOPEN1.zip` |
+| 全國營業(稅籍)登記(停業)資料集 | 財政部財政資訊中心 | <https://data.gov.tw/dataset/75140> | `BGMOPEN1X.csv` |
+
+The dataset workflow turns `attribution.exhibit`, `attribution.statement`, and
+`attribution.licenseUrl` into the GitHub Release notes. `--no-suspended`
+drops the suspended dataset from the exhibit.
 
 ## UBN checksum
 

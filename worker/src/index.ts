@@ -1,4 +1,4 @@
-import { normalizeFia, shardOf, validateUBN, type UBNResult } from './lib';
+import { datasetResult, normalizeFia, shardOf, validateUBN, type ShardRow, type UBNResult } from './lib';
 
 export interface Env {
   /** R2 bucket holding the published dataset. Optional; falls back to FIA. */
@@ -53,9 +53,9 @@ async function fromR2(ban: string, env: Env): Promise<UBNResult | null> {
   const obj = await env.UBN_BUCKET.get(`${latest}/shards/${shardOf(ban, shards)}.json`);
   if (!obj) return null;
 
-  const rows = (await obj.json()) as UBNResult[];
+  const rows = (await obj.json()) as ShardRow[];
   const rec = rows.find((r) => r.ban === ban);
-  return rec ? { ...rec, found: true, source: 'dataset' } : null;
+  return rec ? datasetResult(rec) : null;
 }
 
 /** Fall back to the official FIA per-record API (404 => not found). */

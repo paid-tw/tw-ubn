@@ -8,12 +8,13 @@
 //! Outputs, under --out (default ./dist):
 //!   ubn.ndjson.gz       full dataset, one JSON object per line
 //!   ubn.sqlite          full dataset, indexed on ban
-//!   shards/<n>.json     per-UBN shards (ban -> {name,address,useInvoice})
+//!   shards/<n>.json     per-UBN shards (ban -> {name,address,useInvoice,status})
 //!   state.tsv           ban -> content hash, for the next run to diff against
 //!   d1/schema.sql       CREATE TABLE IF NOT EXISTS (apply once)
+//!   d1/migrate.sql      idempotent ADD COLUMN for pre-existing databases
 //!   d1/delta.sql        upserts + deletes vs --prev (apply daily to D1)
 //!   changed-shards.txt  shard buckets touched by the delta (partial R2 sync)
-//!   manifest.json       data date, rows, shards, hash, license, delta counts
+//!   manifest.json       data date, rows, shards, hash, OGDL attribution, delta counts
 //!
 //! Usage:
 //!   ubn-build [--out DIR] [--shards N] [--prev state.tsv]
@@ -22,10 +23,12 @@
 //! Pass the previous run's state.tsv as --prev so d1/delta.sql holds only the
 //! day's changes; without it, the delta is a full load.
 
+mod attribution;
 mod incremental;
 mod transform;
 
 use anyhow::{bail, Context, Result};
+use attribution::{IncludedSource, ACTIVE_URL, SUSPENDED_URL};
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use rusqlite::{params, Connection};
@@ -35,9 +38,6 @@ use std::io::{BufWriter, Read, Write};
 use std::path::PathBuf;
 use transform::{parse_csv, Record, ShardRecord, Status};
 use ubn_core::shard_of;
-
-const ACTIVE_URL: &str = "https://eip.fia.gov.tw/data/BGMOPEN1.zip";
-const SUSPENDED_URL: &str = "https://eip.fia.gov.tw/data/BGMOPEN1X.csv";
 
 struct Args {
     out: PathBuf,
@@ -129,12 +129,14 @@ fn write_sqlite(records: &[Record], path: &std::path::Path) -> Result<()> {
          CREATE TABLE ubn(
            ban TEXT, name TEXT, address TEXT, capital TEXT,
            setup_date TEXT, setup_date_iso TEXT, org_type TEXT,
-           use_invoice INTEGER, status TEXT, industries TEXT);",
+           use_invoice INTEGER, status TEXT, industries TEXT,
+           suspension_date TEXT, suspension_date_iso TEXT);",
     )?;
     {
         let tx = conn.transaction()?;
         {
-            let mut stmt = tx.prepare("INSERT INTO ubn VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)")?;
+            let mut stmt =
+                tx.prepare("INSERT INTO ubn VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)")?;
             for r in records {
                 stmt.execute(params![
                     r.ban,
@@ -147,6 +149,8 @@ fn write_sqlite(records: &[Record], path: &std::path::Path) -> Result<()> {
                     r.use_invoice,
                     r.status,
                     serde_json::to_string(&r.industries)?,
+                    r.suspension_date,
+                    r.suspension_date_iso,
                 ])?;
             }
         }
@@ -155,6 +159,18 @@ fn write_sqlite(records: &[Record], path: &std::path::Path) -> Result<()> {
     conn.execute("CREATE INDEX idx_ban ON ubn(ban)", [])?;
     conn.execute("VACUUM", [])?;
     Ok(())
+}
+
+/// Suspended rows first so a duplicate UBN (unlikely) resolves to the active row.
+fn merge_records(suspended: Vec<Record>, active: Vec<Record>) -> Vec<Record> {
+    let mut by_ban: BTreeMap<String, Record> = BTreeMap::new();
+    for r in suspended {
+        by_ban.insert(r.ban.clone(), r);
+    }
+    for r in active {
+        by_ban.insert(r.ban.clone(), r);
+    }
+    by_ban.into_values().collect()
 }
 
 fn main() -> Result<()> {
@@ -166,25 +182,28 @@ fn main() -> Result<()> {
         Some(p) => csv_from_zip(&fs::read(p)?)?,
         None => csv_from_zip(&http_get(ACTIVE_URL)?)?,
     };
-    let active = parse_csv(active_csv.as_bytes(), Status::Active)?;
+    let active = parse_csv(active_csv.as_bytes(), Status::Active)
+        .context("parsing active registry (BGMOPEN1)")?;
     let data_date = active.data_date.clone();
 
-    // Suspended first so an (unlikely) duplicate UBN resolves to the active row.
-    let mut by_ban: BTreeMap<String, Record> = BTreeMap::new();
-    if !args.no_suspended {
+    let (suspended_records, suspended_date) = if args.no_suspended {
+        (Vec::new(), None)
+    } else {
         eprintln!("==> loading suspended tax registry");
         let csv = match &args.suspended_csv {
             Some(p) => fs::read_to_string(p)?,
             None => String::from_utf8(http_get(SUSPENDED_URL)?)?,
         };
-        for r in parse_csv(csv.as_bytes(), Status::Suspended)?.records {
-            by_ban.insert(r.ban.clone(), r);
-        }
-    }
-    for r in active.records {
-        by_ban.insert(r.ban.clone(), r);
-    }
-    let records: Vec<Record> = by_ban.into_values().collect();
+        let suspended = parse_csv(csv.as_bytes(), Status::Suspended)
+            .context("parsing suspended registry (BGMOPEN1X)")?;
+        eprintln!(
+            "    {} suspended rows (data date {:?})",
+            suspended.records.len(),
+            suspended.data_date
+        );
+        (suspended.records, suspended.data_date)
+    };
+    let records = merge_records(suspended_records, active.records);
     eprintln!("==> {} records (data date {:?})", records.len(), data_date);
 
     eprintln!("==> writing shards ({})", args.shards);
@@ -205,6 +224,7 @@ fn main() -> Result<()> {
     fs::create_dir_all(args.out.join("d1"))?;
     incremental::write_state(&records, &hashes, &args.out.join("state.tsv"))?;
     incremental::write_schema_sql(&args.out.join("d1/schema.sql"))?;
+    incremental::write_migrate_sql(&args.out.join("d1/migrate.sql"))?;
     incremental::write_delta_sql(&records, &delta, &args.out.join("d1/delta.sql"))?;
     incremental::write_changed_shards(
         &records,
@@ -219,22 +239,20 @@ fn main() -> Result<()> {
         delta.unchanged
     );
 
-    let manifest = serde_json::json!({
-        "source": ACTIVE_URL,
-        "sourceAgency": "財政部財政資訊中心 (Fiscal Information Agency, Ministry of Finance)",
-        "dataDate": data_date,
-        "builtAt": chrono_now(),
-        "rows": records.len(),
-        "shards": args.shards,
-        "hash": "fnv1a-32",
-        "license": "政府資料開放授權條款-第1版 (Open Government Data License v1.0)",
-        "delta": {
-            "upserts": delta.upserts.len(),
-            "deletes": delta.deletes.len(),
-            "unchanged": delta.unchanged,
-            "hadPrevious": args.prev.is_some(),
-        },
-    });
+    let suspended = if args.no_suspended {
+        IncludedSource::Skipped
+    } else {
+        IncludedSource::Loaded(suspended_date.as_deref())
+    };
+    let manifest = manifest_json(
+        data_date.as_deref(),
+        suspended,
+        records.len(),
+        args.shards,
+        &chrono_now(),
+        &delta,
+        args.prev.is_some(),
+    )?;
     fs::write(
         args.out.join("manifest.json"),
         serde_json::to_string_pretty(&manifest)?,
@@ -242,6 +260,32 @@ fn main() -> Result<()> {
 
     eprintln!("==> done; artifacts in {}", args.out.display());
     Ok(())
+}
+
+/// Attribution from this branch, plus the incremental `delta` counts main added.
+fn manifest_json(
+    active_date: Option<&str>,
+    suspended: IncludedSource<'_>,
+    rows: usize,
+    shards: u32,
+    built_at: &str,
+    delta: &incremental::Diff,
+    had_previous: bool,
+) -> Result<serde_json::Value> {
+    let mut manifest = serde_json::to_value(attribution::build_manifest(
+        active_date,
+        suspended,
+        rows,
+        shards,
+        built_at,
+    ))?;
+    manifest["delta"] = serde_json::json!({
+        "upserts": delta.upserts.len(),
+        "deletes": delta.deletes.len(),
+        "unchanged": delta.unchanged,
+        "hadPrevious": had_previous,
+    });
+    Ok(manifest)
 }
 
 /// Minimal RFC3339 UTC timestamp without pulling in a date crate.
@@ -272,3 +316,6 @@ fn chrono_now() -> String {
         secs % 60
     )
 }
+
+#[cfg(test)]
+mod build_tests;

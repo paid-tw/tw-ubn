@@ -55,14 +55,30 @@ jobs:
         run: |
           gzip -kf dist/state.tsv
           tar -czf dist/shards.tar.gz -C dist shards
-          gh release create "${{ steps.m.outputs.tag }}" \
-            dist/ubn.ndjson.gz dist/ubn.sqlite dist/shards.tar.gz dist/manifest.json \
-            dist/state.tsv.gz dist/d1/schema.sql dist/d1/delta.sql dist/changed-shards.txt \
-            --title "Dataset ${{ steps.m.outputs.date }}" \
-            --notes "FIA snapshot ${{ steps.m.outputs.date }}. Delta ${{ steps.m.outputs.delta }}. OGDL v1.0." \
-          || gh release upload "${{ steps.m.outputs.tag }}" \
-            dist/ubn.ndjson.gz dist/ubn.sqlite dist/shards.tar.gz dist/manifest.json \
-            dist/state.tsv.gz dist/d1/schema.sql dist/d1/delta.sql dist/changed-shards.txt --clobber
+          # 顯名聲明 from the Rust manifest (attribution.exhibit / statement / licenseUrl).
+          # Omitting it means the Open Government Data License was not granted.
+          jq -r '
+            .attribution.exhibit,
+            "",
+            .attribution.statement,
+            "",
+            ("政府資料開放授權條款：" + .attribution.licenseUrl),
+            "",
+            ("FIA tax registry snapshot " + (.dataDate // "unknown") + ". rows=" + (.rows | tostring) + "."),
+            ("Delta " + (.delta | tostring) + ".")
+          ' dist/manifest.json > dist/release-notes.md
+          ASSETS="dist/ubn.ndjson.gz dist/ubn.sqlite dist/shards.tar.gz dist/manifest.json
+                  dist/state.tsv.gz dist/d1/schema.sql dist/d1/migrate.sql dist/d1/delta.sql dist/changed-shards.txt"
+          if ! gh release create "${{ steps.m.outputs.tag }}" $ASSETS \
+                --title "Dataset ${{ steps.m.outputs.date }}" \
+                --notes-file dist/release-notes.md; then
+            # Same-day rerun: the release exists. Replace its assets AND refresh
+            # the title/notes so the attribution and version match the new data.
+            gh release upload "${{ steps.m.outputs.tag }}" $ASSETS --clobber
+            gh release edit "${{ steps.m.outputs.tag }}" \
+              --title "Dataset ${{ steps.m.outputs.date }}" \
+              --notes-file dist/release-notes.md
+          fi
           gh release upload data-latest dist/state.tsv.gz dist/manifest.json --clobber \
           || gh release create data-latest dist/state.tsv.gz dist/manifest.json \
             --title "latest" --notes "rolling state for incremental diffs"
@@ -77,6 +93,12 @@ jobs:
           D1_DATABASE: ${{ secrets.D1_DATABASE }}
         run: |
           npx -y wrangler@4 d1 execute "$D1_DATABASE" --remote --file dist/d1/schema.sql -y
+          # Upgrade pre-existing databases: add any new columns, ignoring the
+          # duplicate-column error a freshly-created table raises.
+          while IFS= read -r stmt; do
+            [ -z "$stmt" ] && continue
+            npx -y wrangler@4 d1 execute "$D1_DATABASE" --remote --command "$stmt" -y 2>/dev/null || true
+          done < dist/d1/migrate.sql
           if [ -s dist/d1/delta.sql ]; then
             npx -y wrangler@4 d1 execute "$D1_DATABASE" --remote --file dist/d1/delta.sql -y
           else

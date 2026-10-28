@@ -82,27 +82,27 @@ fn q(s: &str) -> String {
     format!("'{}'", s.replace('\'', "''"))
 }
 
-const COLUMNS: &str =
-    "ban, name, address, capital, setup_date, setup_date_iso, org_type, use_invoice, status, industries";
+const COLUMNS: &str = "ban, name, address, capital, setup_date, setup_date_iso, org_type, use_invoice, status, suspension_date, suspension_date_iso, industries";
+
+fn sql_text(value: Option<&str>) -> String {
+    value.map(q).unwrap_or_else(|| "NULL".into())
+}
 
 fn values(r: &Record) -> String {
-    let iso = r
-        .setup_date_iso
-        .as_deref()
-        .map(q)
-        .unwrap_or_else(|| "NULL".into());
     let industries = serde_json::to_string(&r.industries).unwrap_or_else(|_| "[]".into());
     format!(
-        "({}, {}, {}, {}, {}, {}, {}, {}, {}, {})",
+        "({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})",
         q(&r.ban),
         q(&r.name),
         q(&r.address),
         q(&r.capital),
         q(&r.setup_date),
-        iso,
+        sql_text(r.setup_date_iso.as_deref()),
         q(&r.org_type),
         if r.use_invoice { 1 } else { 0 },
         q(r.status),
+        sql_text(r.suspension_date.as_deref()),
+        sql_text(r.suspension_date_iso.as_deref()),
         q(&industries),
     )
 }
@@ -118,8 +118,25 @@ pub fn write_schema_sql(path: &Path) -> Result<()> {
         "CREATE TABLE IF NOT EXISTS ubn (\n  \
          ban TEXT PRIMARY KEY, name TEXT, address TEXT, capital TEXT,\n  \
          setup_date TEXT, setup_date_iso TEXT, org_type TEXT,\n  \
-         use_invoice INTEGER, status TEXT, industries TEXT\n);\n\
+         use_invoice INTEGER, status TEXT,\n  \
+         suspension_date TEXT, suspension_date_iso TEXT, industries TEXT\n);\n\
          CREATE INDEX IF NOT EXISTS idx_name ON ubn (name);"
+    )?;
+    Ok(())
+}
+
+/// Idempotent column adds for D1 databases created before these columns
+/// existed. `CREATE TABLE IF NOT EXISTS` never alters an existing table, so an
+/// old `ubn` would lack `suspension_date` / `suspension_date_iso` and the first
+/// delta upsert would fail with "table ubn has no column named suspension_date".
+/// Apply each statement on its own, ignoring the "duplicate column name" error a
+/// freshly-created table raises.
+pub fn write_migrate_sql(path: &Path) -> Result<()> {
+    let mut w = BufWriter::new(File::create(path)?);
+    writeln!(
+        w,
+        "ALTER TABLE ubn ADD COLUMN suspension_date TEXT;\n\
+         ALTER TABLE ubn ADD COLUMN suspension_date_iso TEXT;"
     )?;
     Ok(())
 }
@@ -135,7 +152,9 @@ pub fn write_delta_sql(records: &[Record], d: &Diff, path: &Path) -> Result<()> 
              name=excluded.name, address=excluded.address, capital=excluded.capital, \
              setup_date=excluded.setup_date, setup_date_iso=excluded.setup_date_iso, \
              org_type=excluded.org_type, use_invoice=excluded.use_invoice, \
-             status=excluded.status, industries=excluded.industries;",
+             status=excluded.status, suspension_date=excluded.suspension_date, \
+             suspension_date_iso=excluded.suspension_date_iso, \
+             industries=excluded.industries;",
             values(r),
         )?;
     }
@@ -188,6 +207,8 @@ mod tests {
             org_type: "獨資".into(),
             use_invoice: false,
             status: Status::Active.as_str(),
+            suspension_date: None,
+            suspension_date_iso: None,
             industries: vec![],
         }
     }
@@ -212,7 +233,9 @@ mod tests {
 
     #[test]
     fn sql_quotes_are_escaped_and_upsert_is_wellformed() {
-        let r = rec("10000001", "O'Reilly 商行");
+        let mut r = rec("10000001", "O'Reilly 商行");
+        r.suspension_date = Some("1150101".into());
+        r.suspension_date_iso = Some("2026-01-01".into());
         let d = Diff {
             upserts: vec![0],
             deletes: vec!["10000009".into()],
@@ -222,9 +245,22 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let p = dir.join("delta.sql");
         write_delta_sql(&[r], &d, &p).unwrap();
+        let schema_path = dir.join("schema.sql");
+        write_schema_sql(&schema_path).unwrap();
+        let schema = std::fs::read_to_string(&schema_path).unwrap();
+        assert!(schema.contains("suspension_date TEXT"));
+        assert!(schema.contains("CREATE INDEX IF NOT EXISTS idx_name ON ubn (name)"));
+        let migrate_path = dir.join("migrate.sql");
+        write_migrate_sql(&migrate_path).unwrap();
+        let migrate = std::fs::read_to_string(&migrate_path).unwrap();
+        assert!(migrate.contains("ALTER TABLE ubn ADD COLUMN suspension_date TEXT;"));
+        assert!(migrate.contains("ALTER TABLE ubn ADD COLUMN suspension_date_iso TEXT;"));
         let sql = std::fs::read_to_string(&p).unwrap();
         assert!(sql.contains("'O''Reilly 商行'"));
         assert!(sql.contains("ON CONFLICT(ban) DO UPDATE"));
+        assert!(sql.contains("'1150101'"));
+        assert!(sql.contains("'2026-01-01'"));
+        assert!(sql.contains("suspension_date=excluded.suspension_date"));
         assert!(sql.contains("DELETE FROM ubn WHERE ban IN ('10000009');"));
         assert!(!sql.contains("BEGIN")); // D1 import manages the transaction
     }
