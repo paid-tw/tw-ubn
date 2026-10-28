@@ -51,6 +51,10 @@ is a single cache-friendly request to static data you host yourself.
 
 ## Client usage
 
+```bash
+npm install @paid-tw/ubn   # or pnpm add / yarn add
+```
+
 ```ts
 import { lookupVAT, validateUBN, InvalidUBNError } from '@paid-tw/ubn';
 
@@ -146,12 +150,11 @@ vectors (see `client/src/__tests__`) keep them from drifting.
 
 `@paid-tw/ubn` (`client/`) publishes on a git tag: push `ubn-vX.Y.Z` and the
 [release workflow](.github/workflows/release.yml) tests, builds, and publishes
-via **npm OIDC trusted publishing (no token, with provenance)**. First configure
-the package's trusted publisher on npmjs to this repo's `release.yml`.
+via **npm OIDC trusted publishing (no token, with provenance)**.
 
 ```bash
-cd client && npm version 0.1.0   # or edit package.json
-git tag ubn-v0.1.0 && git push origin ubn-v0.1.0
+cd client && npm version 0.1.1   # or edit package.json
+git tag ubn-v0.1.1 && git push origin ubn-v0.1.1
 ```
 
 ## License

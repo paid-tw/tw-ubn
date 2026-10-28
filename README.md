@@ -44,6 +44,10 @@ CDN 快取的請求。
 
 ## 客戶端用法
 
+```bash
+npm install @paid-tw/ubn   # 或 pnpm add / yarn add
+```
+
 ```ts
 import { lookupVAT, validateUBN, InvalidUBNError } from '@paid-tw/ubn';
 
@@ -133,12 +137,11 @@ Rust core 與 TS 客戶端各自實作同樣的 ~3 個函式；共用的測試�
 
 `@paid-tw/ubn`（`client/`）以 git tag 觸發發行：推一個 `ubn-vX.Y.Z` tag，
 [release workflow](.github/workflows/release.yml) 會測試、建置並以 **npm OIDC
-trusted publishing（免 token、附 provenance）** 發佈。首次請先在 npmjs 上把該套件
-的 trusted publisher 設為本 repo 的 `release.yml`。
+trusted publishing（免 token、附 provenance）** 發佈。
 
 ```bash
-cd client && npm version 0.1.0   # 或手動改 package.json
-git tag ubn-v0.1.0 && git push origin ubn-v0.1.0
+cd client && npm version 0.1.1   # 更新 package.json 版本
+git tag ubn-v0.1.1 && git push origin ubn-v0.1.1
 ```
 
 ## 授權
