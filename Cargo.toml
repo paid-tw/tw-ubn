@@ -4,5 +4,6 @@ members = ["crates/ubn-core", "crates/ubn-build"]
 
 [workspace.package]
 edition = "2021"
+rust-version = "1.88"
 license = "MIT"
 repository = "https://github.com/paid-tw/tw-ubn"
