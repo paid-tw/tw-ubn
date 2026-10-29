@@ -228,6 +228,71 @@ CNS 11643 全字庫 mapping) has not been verified, so there is no conversion
 table. Because the flag is serialized only when true, adding it changed the
 row hash of flagged rows only.
 
+## Coverage gaps: `found: false` is not an invalid UBN
+
+A lookup answers `found: false` when no source returned a record for the UBN:
+the dataset (the VAT registry `BGMOPEN1` / `BGMOPEN1X` plus the
+[withholding units](#withholding-units) we include), the FIA per-record API
+(404), and GCIS company registration. It is "no record returned", not proof of
+absence from every source:
+
+- If the dataset read failed (FIA still said 404) or GCIS failed detectably
+  (HTTP error, network error, timeout, a body that isn't a JSON array), the
+  remaining sources answered; that `found: false` is **not cached**.
+- GCIS answers "no such company" with HTTP 200 and an empty body, the same bytes
+  as its known outage mode, so the two can't be told apart. That `found: false`
+  is cached for `NEGATIVE_CACHE_TTL` only (default 1 hour), not `CACHE_TTL`.
+- Only a dataset miss, a FIA 404 and a parsed GCIS answer together are cached for
+  the full `CACHE_TTL`.
+
+Either way it does **not** mean "this UBN does not exist". Integrators should
+treat it as a hint and let the buyer type the title.
+
+### Valid UBNs with no public source (measured 2026-10-29, [#8](https://github.com/paid-tw/tw-ubn/issues/8))
+
+From one real checkout system's 39,509 distinct UBNs, 2,739 (6.9%) had a valid
+checksum but were absent from the VAT registry, the three withholding-unit
+lists, and GCIS company registration. Classified by the title the buyer typed:
+
+| Category (by title keyword) | UBNs | Source checked | Carries the UBN? |
+|---|---:|---|---|
+| Professional practices (會計師, 記帳士, 律師, 建築師, 地政士 …) | 1,028 | Searched; no public roster with UBNs found | Not found |
+| Hospitals, clinics, other medical institutions | 460 | [醫療機構基本資料](https://data.gov.tw/dataset/15393) | No — `機構代碼` only |
+| Companies / 商號 | 350 | GCIS business (商號) registration — unmeasured, see below | — |
+| Licensed cram schools (短期補習班) | 259 | [全國立案短期補習班基本資料](https://data.gov.tw/dataset/16461); [商業登記－短期補習班業](https://data.gov.tw/dataset/81117) | First: no. Second: yes, but 107 rows, 0 hits |
+| Long-term care, nursing homes, social welfare | 196 | [長照ABC據點](https://data.gov.tw/dataset/88270) | No — `機構代碼` only |
+| Other / can't tell from the title | 157 | — | — |
+| Employee welfare committees (職工福利委員會) | 129 | Searched; only one city-level dataset, empty | Not found |
+| Daycare (托嬰中心; kindergartens are in `BGMOPEN99X`) | 57 | Searched; county statistics and rosters only | Not found |
+| Scattered: agencies, juridical persons, building committees, religious bodies, schools | 103 | — | — |
+
+"No" was confirmed from the dataset's field list on data.gov.tw; "Not found"
+only means a search turned nothing up. These units hold withholding-unit UBNs
+(扣繳單位統編) issued by the tax bureau, but the Ministry of Finance publishes
+only schools, nonprofits and Executive Yuan agencies.
+
+The 商號 row is unmeasured because the GCIS business-registration API
+(`7E6AFA72-AD6A-46D3-8681-ED77951D912D`, filtered by `President_No`) returned
+HTTP 200 with an empty body for every call in the batch, while single manual
+queries before it worked. The Workers don't query it.
+
+### Typos that pass the checksum
+
+In the same sample, 53 UBNs with a valid checksum and `found: false` had a
+buyer-typed title that matched, in the dataset, a UBN differing in one or two
+digits — almost certainly typos. The `% 5` checksum doesn't catch every
+single-digit error. (For comparison, 129 of the 189 UBNs that *failed* the
+checksum could be corrected the same way.) This is another reason to show
+`found: false` as "please double-check" rather than as an error.
+
+### Not done: a `reason` field
+
+The lookup does not say *why* a UBN was not found (e.g. `not_in_registry`).
+Until there is a source that can tell these categories apart, a single
+`found: false` is more honest than a guess. Terminated companies are the
+exception: GCIS identifies them, so they come back as `found: true` with
+`status: "closed"`.
+
 ## Licence
 
 `manifest.json` (written by `ubn-build`) is the per-build copy of the

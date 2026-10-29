@@ -22,16 +22,17 @@ is a single cache-friendly request to static data you host yourself.
 
 ```
  daily  FIA tax registry: BGMOPEN1.zip (active) + BGMOPEN1X.csv (suspended)
+        FIA withholding units: BGMOPEN99.csv (nonprofits) + BGMOPEN99X.csv (schools) + agency list
            │
-           ▼  ubn-build (Rust): normalize (ROC→ISO), merge + status flag
+           ▼  ubn-build (Rust): normalize (ROC→ISO), merge + status / kind
          dist/
-           ├─ shards/<n>.json   8192 per-UBN shards (ban → name/address/useInvoice/status)
+           ├─ shards/<n>.json   8192 per-UBN shards (ban → name/address/useInvoice/status/kind)
            ├─ ubn.sqlite        full dataset, indexed on ban
            ├─ ubn.ndjson.gz     full dataset, one JSON object per line
            └─ manifest.json     data date, rows, shards, hash, license
 
  checkout ─► your CDN (R2 + Cloudflare) ─► shards/<bucket>.json   (1 request, edge-cached)
-                            miss ─► Worker ─► FIA per-record API (cached at edge)
+                            miss ─► Worker ─► FIA per-record API ─► GCIS company registry (cached at edge)
 ```
 
 - **FIA tax registry** is the primary source: it covers every VAT-registered
@@ -39,12 +40,19 @@ is a single cache-friendly request to static data you host yourself.
   uniform-invoice flag — exactly what checkout needs. Updated daily.
 - Active-vs-suspended **status** comes from FIA itself (`BGMOPEN1` +
   `BGMOPEN1X`), so GCIS is not needed for it. Shard records include
-  `status` (`active` or `suspended`). Shards built before that field omit
-  it; a missing value means unknown, not active. The suspension date is on
-  the full dataset only, not on the checkout shard.
-- **GCIS** (company/business registration) is optional, per-record enrichment
-  (e.g. responsible person); see [`docs/data-dictionary.md`](docs/data-dictionary.md)
-  for why there is no usable GCIS bulk master.
+  `status` (`active`, `suspended`, or `closed` — deregistered, withholding
+  units only). Shards built before that field omit it; a missing value means
+  unknown, not active. The suspension date is on the full dataset only, not on
+  the checkout shard.
+- **Withholding units** (schools, kindergartens, nonprofits, Executive Yuan
+  agencies) hold a valid UBN without being VAT-registered, so they are not in
+  the tax registry. The build merges them in, tagged by `kind` (`business` /
+  `nonprofit` / `school` / `agency`), always with `useInvoice: false`.
+- **GCIS** (company registration) has no usable bulk master (see
+  [`docs/data-dictionary.md`](docs/data-dictionary.md)), so it is used at query
+  time only: when both the dataset and FIA miss, the Worker asks GCIS, which
+  knows dissolved/revoked companies (`status: "closed"`, `closedDate`) and live
+  companies that aren't in the tax registry.
 - A brand-new UBN not yet in the daily snapshot falls back to the **documented
   FIA per-record API**, behind your own edge cache so the government server is
   hit at most once per UBN per cache window — never per checkout.
@@ -74,6 +82,32 @@ if (validateUBN(ban)) {
 
 The `validateUBN` checksum is verified against all ~1.7M active UBNs (100%); it
 uses the post-2023 rule, not the stale `% 10` one found in many snippets.
+
+## Reading a lookup: not found ≠ invalid UBN
+
+The Worker's `/v1/vat/:ban` answers in one of four ways:
+
+| Response | Meaning | What checkout should do |
+|---|---|---|
+| `200 { "found": true, … }` | Found. `source` is `dataset` / `fia-api` / `gcis`; `status` is optional (`active` / `suspended` / `closed`) and absent on FIA-API hits and live GCIS companies — **missing means unknown, not active** | Fill in `name`; `suspended` and `closed` deserve a hint. Don't autofill a name flagged `nameHasPrivateUse` |
+| `200 { "found": false }` | **No source returned a record**: the dataset, FIA and GCIS had nothing (if one of them failed, only the others were consulted) | A hint at most; let the buyer type the title. **Don't** block checkout |
+| `400 { "error": "invalid_ubn" }` | Bad checksum — the UBN is certainly mistyped | Ask the buyer to check it |
+| `502 { "found": null, "error": "upstream_unavailable" }` | Upstream outage — **no answer** | Treat as not looked up; show nothing |
+
+`found: false` **does not mean the UBN is invalid**. Many valid, in-use UBNs have
+no public source that carries the UBN: professional practices (accountants,
+bookkeepers, lawyers, architects, land agents), hospitals and clinics, licensed
+cram schools, long-term-care and social-welfare institutions, employee welfare
+committees, daycare centres, building management committees, and more. Their
+UBNs are withholding-unit UBNs issued by the tax bureau, but the Ministry of
+Finance only publishes three such categories (schools, nonprofits, Executive
+Yuan agencies). In a sample of ~40k real checkout UBNs, about 7% had a valid
+checksum yet `found: false`, mostly in those categories.
+
+Conversely, the `% 5` checksum doesn't catch every single-digit typo, so
+`found: false` can also be a typo — which is exactly why it works as a
+"please double-check" hint rather than an error. Categories and measurements:
+[`docs/data-dictionary.md`](docs/data-dictionary.md#coverage-gaps-found-false-is-not-an-invalid-ubn).
 
 ## One-click lookup service (two versions)
 
