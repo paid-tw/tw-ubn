@@ -83,6 +83,32 @@ if (validateUBN(ban)) {
 The `validateUBN` checksum is verified against all ~1.7M active UBNs (100%); it
 uses the post-2023 rule, not the stale `% 10` one found in many snippets.
 
+## Reading a lookup: not found ≠ invalid UBN
+
+The Worker's `/v1/vat/:ban` answers in one of four ways:
+
+| Response | Meaning | What checkout should do |
+|---|---|---|
+| `200 { "found": true, … }` | Found. `status` is `active` / `suspended` / `closed`; `source` is `dataset` / `fia-api` / `gcis` | Fill in `name`; `suspended` and `closed` deserve a hint. Don't autofill a name flagged `nameHasPrivateUse` |
+| `200 { "found": false }` | **Not in the VAT registry, the withholding-unit lists we include, or GCIS company registration** | A hint at most; let the buyer type the title. **Don't** block checkout |
+| `400 { "error": "invalid_ubn" }` | Bad checksum — the UBN is certainly mistyped | Ask the buyer to check it |
+| `502 { "found": null, "error": "upstream_unavailable" }` | Upstream outage — **no answer** | Treat as not looked up; show nothing |
+
+`found: false` **does not mean the UBN is invalid**. Many valid, in-use UBNs have
+no public source that carries the UBN: professional practices (accountants,
+bookkeepers, lawyers, architects, land agents), hospitals and clinics, licensed
+cram schools, long-term-care and social-welfare institutions, employee welfare
+committees, daycare centres, building management committees, and more. Their
+UBNs are withholding-unit UBNs issued by the tax bureau, but the Ministry of
+Finance only publishes three such categories (schools, nonprofits, Executive
+Yuan agencies). In a sample of ~40k real checkout UBNs, about 7% had a valid
+checksum yet `found: false`, mostly in those categories.
+
+Conversely, the `% 5` checksum doesn't catch every single-digit typo, so
+`found: false` can also be a typo — which is exactly why it works as a
+"please double-check" hint rather than an error. Categories and measurements:
+[`docs/data-dictionary.md`](docs/data-dictionary.md#coverage-gaps-found-false-is-not-an-invalid-ubn).
+
 ## One-click lookup service (two versions)
 
 The two **Deploy to Cloudflare** buttons each deploy a self-contained Worker to

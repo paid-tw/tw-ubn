@@ -73,6 +73,27 @@ if (validateUBN(ban)) {
 `validateUBN` 的檢查碼已對全部約 170 萬筆營業中統編驗證（100% 通過），採用 **2023 年
 後的規則**，而非許多網路片段裡過時的 `% 10` 版本。
 
+## 查詢結果怎麼解讀：查無不等於統編錯誤
+
+Worker 的 `/v1/vat/:ban` 有四種回應：
+
+| 回應 | 意思 | 結帳端建議 |
+|---|---|---|
+| `200 { "found": true, … }` | 找到。`status` 為 `active`／`suspended`／`closed`；`source` 為 `dataset`／`fia-api`／`gcis` | 帶入 `name`；`suspended`、`closed` 可提示買家。名稱含 `nameHasPrivateUse` 時不要自動帶入 |
+| `200 { "found": false }` | **不在營業稅籍、已收錄的扣繳單位，也不在 GCIS 公司登記** | 只當提示，讓買家自己填抬頭；**不要**擋下結帳 |
+| `400 { "error": "invalid_ubn" }` | 檢查碼錯誤，統編一定打錯 | 請買家確認統編 |
+| `502 { "found": null, "error": "upstream_unavailable" }` | 上游故障，**沒有答案** | 當作沒查，不顯示任何提示 |
+
+`found: false` **不代表統編無效**。很多合法、正在使用的統編沒有任何帶統一編號的公開資料：
+執行業務事務所（會計師、記帳士、律師、建築師、地政士）、醫院診所、立案補習班、長照與社福
+機構、職工福利委員會、托嬰中心、公寓大廈管理委員會等。它們的統編是國稅局核發的扣繳單位統編，
+但財政部只開放了學校、非營利機關團體、行政院所屬機關三類。在一份約 4 萬個真實結帳統編的樣本中，
+檢查碼正確卻 `found: false` 的約占 7%，而且大多屬於上述類別。
+
+反過來，`% 5` 檢查碼也擋不住所有打錯一位數的情況，所以 `found: false` 也可能是打錯——這正是
+為什麼它適合當「請再確認一次」的提示，而不是錯誤。分類與量測細節見
+[`docs/data-dictionary.md`](docs/data-dictionary.md#coverage-gaps-found-false-is-not-an-invalid-ubn)。
+
 ## 一鍵部署查詢服務（兩個版本）
 
 上面兩個 **Deploy to Cloudflare** 按鈕各部署一個自包含的 Worker 到你的帳號：
