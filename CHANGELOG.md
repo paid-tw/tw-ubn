@@ -30,6 +30,13 @@ ship when merged to `main`.
   flags `--no-withholding`, `--no-nonprofit`, `--no-school`, `--no-agency` and
   `--nonprofit-csv`/`--school-csv`/`--agency-csv`
   ([#18](https://github.com/paid-tw/tw-ubn/pull/18)).
+- Dataset, `worker`, `worker-d1`: rows whose name contains a Unicode Private Use
+  Area character (the tax registry's locally-defined 造字, shown as a box in
+  most fonts) carry `nameHasPrivateUse: true` in shards and lookup results
+  (`name_has_private_use` in `ubn.ndjson.gz`, `ubn.sqlite` and D1), so a
+  checkout can avoid autofilling them as an invoice title. The name itself is
+  unchanged. `manifest.json` reports the count as `namesWithPrivateUse`
+  ([#20](https://github.com/paid-tw/tw-ubn/pull/20)).
 
 ### Fixed
 
