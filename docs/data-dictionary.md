@@ -230,13 +230,23 @@ row hash of flagged rows only.
 
 ## Coverage gaps: `found: false` is not an invalid UBN
 
-A lookup answers `found: false` when the UBN is in none of: the VAT registry
-(`BGMOPEN1` / `BGMOPEN1X`), the [withholding units](#withholding-units) we
-include, the FIA per-record API (404), or GCIS company registration. If GCIS
-was unavailable, only the first three were checked (that `found: false` is not
-cached). Either way it means "not in any source we have", **not** "this UBN does
-not exist". Integrators should treat it as a hint and let the buyer type the
-title.
+A lookup answers `found: false` when no source returned a record for the UBN:
+the dataset (the VAT registry `BGMOPEN1` / `BGMOPEN1X` plus the
+[withholding units](#withholding-units) we include), the FIA per-record API
+(404), and GCIS company registration. It is "no record returned", not proof of
+absence from every source:
+
+- If the dataset read failed (FIA still said 404) or GCIS failed detectably
+  (HTTP error, network error, timeout, a body that isn't a JSON array), the
+  remaining sources answered; that `found: false` is **not cached**.
+- GCIS answers "no such company" with HTTP 200 and an empty body, the same bytes
+  as its known outage mode, so the two can't be told apart. That `found: false`
+  is cached for `NEGATIVE_CACHE_TTL` only (default 1 hour), not `CACHE_TTL`.
+- Only a dataset miss, a FIA 404 and a parsed GCIS answer together are cached for
+  the full `CACHE_TTL`.
+
+Either way it does **not** mean "this UBN does not exist". Integrators should
+treat it as a hint and let the buyer type the title.
 
 ### Valid UBNs with no public source (measured 2026-10-29, [#8](https://github.com/paid-tw/tw-ubn/issues/8))
 

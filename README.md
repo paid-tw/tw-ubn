@@ -79,8 +79,8 @@ Worker 的 `/v1/vat/:ban` 有四種回應：
 
 | 回應 | 意思 | 結帳端建議 |
 |---|---|---|
-| `200 { "found": true, … }` | 找到。`status` 為 `active`／`suspended`／`closed`；`source` 為 `dataset`／`fia-api`／`gcis` | 帶入 `name`；`suspended`、`closed` 可提示買家。名稱含 `nameHasPrivateUse` 時不要自動帶入 |
-| `200 { "found": false }` | **不在營業稅籍、已收錄的扣繳單位，也不在 GCIS 公司登記** | 只當提示，讓買家自己填抬頭；**不要**擋下結帳 |
+| `200 { "found": true, … }` | 找到。`source` 為 `dataset`／`fia-api`／`gcis`；`status`（選用）為 `active`／`suspended`／`closed`，FIA 單筆 API 與存續中的 GCIS 公司不帶，**缺值代表未知，不是營業中** | 帶入 `name`；`suspended`、`closed` 可提示買家。名稱含 `nameHasPrivateUse` 時不要自動帶入 |
+| `200 { "found": false }` | **沒有任何來源回傳這個統編**：資料集、FIA 與 GCIS 都沒有紀錄（某個來源讀取失敗時，只代表其餘來源沒有） | 只當提示，讓買家自己填抬頭；**不要**擋下結帳 |
 | `400 { "error": "invalid_ubn" }` | 檢查碼錯誤，統編一定打錯 | 請買家確認統編 |
 | `502 { "found": null, "error": "upstream_unavailable" }` | 上游故障，**沒有答案** | 當作沒查，不顯示任何提示 |
 
