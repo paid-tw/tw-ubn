@@ -6,7 +6,10 @@
   "observability": { "enabled": true },
   "vars": {
     "ALLOWED_ORIGINS": "*",
-    "CACHE_TTL": "86400"
+    "CACHE_TTL": "86400",
+    // TTL for a found:false whose GCIS check returned an empty body: GCIS
+    // answers "no such company" and its outage mode identically, so keep it short.
+    "NEGATIVE_CACHE_TTL": "3600"
   },
   "d1_databases": [
     // The Deploy to Cloudflare flow provisions this database and fills the id.
