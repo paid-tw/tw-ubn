@@ -8,7 +8,8 @@
 // rows, or has more than MAX_DROP_PCT percent (default 1) fewer rows than the
 // previous manifest. A missing previous manifest (first run) passes with a
 // notice. ALLOW_SHRINK=true skips the drop check for an intentional shrink;
-// the zero-row and malformed checks still apply. No dependencies.
+// the zero-row and malformed checks (on both manifests) still apply.
+// No dependencies.
 
 import { readFileSync, existsSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
@@ -49,13 +50,6 @@ export function check({ current, previous, maxDropPct = 1, allowShrink = false }
   if (cur.rows === 0) {
     return { ok: false, level: 'error', message: 'current manifest has 0 rows' };
   }
-  if (allowShrink) {
-    return {
-      ok: true,
-      level: 'warning',
-      message: `row-drop check skipped (allow_shrink); current rows=${cur.rows}`,
-    };
-  }
   if (previous == null) {
     return {
       ok: true,
@@ -63,11 +57,20 @@ export function check({ current, previous, maxDropPct = 1, allowShrink = false }
       message: `no previous manifest (first run); current rows=${cur.rows}`,
     };
   }
+  // A supplied previous manifest is validated even under allowShrink: the
+  // override skips only the row-drop comparison.
   let prev;
   try {
     prev = parseManifest(previous, 'previous');
   } catch (e) {
     return { ok: false, level: 'error', message: e.message };
+  }
+  if (allowShrink) {
+    return {
+      ok: true,
+      level: 'warning',
+      message: `row-drop check skipped (allow_shrink); rows ${prev.rows} -> ${cur.rows}`,
+    };
   }
   const summary = `rows ${prev.rows} -> ${cur.rows}`;
   if (prev.rows === 0 || cur.rows >= prev.rows) {

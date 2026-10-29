@@ -66,8 +66,14 @@ test('malformed current manifest fails', () => {
   }
 });
 
-test('malformed previous manifest fails', () => {
+test('malformed previous manifest fails, even with allowShrink', () => {
   assert.equal(check({ current: m(1000), previous: '{oops' }).ok, false);
+  assert.equal(check({ current: m(1000), previous: '{oops', allowShrink: true }).ok, false);
+  assert.equal(check({ current: m(1000), previous: '{}', allowShrink: true }).ok, false);
+});
+
+test('allowShrink with no previous manifest passes as a first run', () => {
+  assert.equal(check({ current: m(1000), previous: null, allowShrink: true }).ok, true);
 });
 
 test('invalid threshold fails', () => {
