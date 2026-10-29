@@ -11,6 +11,25 @@ ship when merged to `main`.
 
 ## [Unreleased]
 
+### Added
+
+- `lookupTitle(ban, { baseUrl, signal?, timeoutMs?, fetchImpl? })` queries a
+  deployed Worker's `/v1/vat/:ban` and resolves to `{ found: true, name, status?, … }`,
+  `{ found: false }` (the Worker says there is no such registration), or `null`
+  (no answer: bad checksum, timeout, abort, network error, any non-2xx including
+  `502 upstream_unavailable`, a malformed body, or a name that is empty or has
+  Private Use Area glyphs). Unlike `lookupVAT`, it never throws
+  ([#14](https://github.com/paid-tw/tw-ubn/pull/14)).
+- `isSameTitle(a, b)` compares two invoice titles while ignoring full-/half-width
+  forms (NFKC), 臺/台, whitespace and Latin case. It never rewrites legal forms
+  such as 股份有限公司 ([#14](https://github.com/paid-tw/tw-ubn/pull/14)).
+- `hasPrivateUse(s)` reports whether a string contains Unicode Private Use Area
+  characters (the registry's custom glyphs), which should not be auto-filled as a
+  title ([#14](https://github.com/paid-tw/tw-ubn/pull/14)).
+- Types: `RegistryStatus` adds `'closed'`, and `UBNRecord` gains optional `kind`
+  (`'business' | 'nonprofit' | 'school' | 'agency'`) and `nameHasPrivateUse`
+  ([#14](https://github.com/paid-tw/tw-ubn/pull/14)).
+
 ### Fixed
 
 - `worker-d1`: fall back to the FIA API when D1 has no `ubn` table yet, instead of
