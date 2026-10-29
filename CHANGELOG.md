@@ -20,6 +20,16 @@ ship when merged to `main`.
   live company not in the tax registry answers with its name and no `status`. New
   `NEGATIVE_CACHE_TTL` var (default 3600 s) for misses GCIS can't confirm
   ([#16](https://github.com/paid-tw/tw-ubn/pull/16)).
+- Dataset: schools and kindergartens, nonprofits (所得稅法 §11(4) bodies) and
+  Executive Yuan agencies — UBNs that are withholding units rather than
+  VAT-registered businesses — are now in the dataset, from the FIA's
+  `BGMOPEN99X`, `BGMOPEN99` and agency-list files. Every row, shard entry and
+  lookup result carries `kind` (`business`, `nonprofit`, `school` or `agency`),
+  and deregistered schools and nonprofits have `status: "closed"`. These rows
+  have `useInvoice: false` and only a county/city as `address`. New `ubn-build`
+  flags `--no-withholding`, `--no-nonprofit`, `--no-school`, `--no-agency` and
+  `--nonprofit-csv`/`--school-csv`/`--agency-csv`
+  ([#18](https://github.com/paid-tw/tw-ubn/pull/18)).
 
 ### Fixed
 

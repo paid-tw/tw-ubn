@@ -1,9 +1,10 @@
 //! Integration-style coverage: real FIA fixture rows go through the same
 //! parse → merge → ndjson/sqlite/shard writers `main` uses.
 
-use super::attribution::IncludedSource;
+use super::attribution::{IncludedSource, Sources};
 use super::incremental::Diff;
 use super::transform::{parse_csv, Status};
+use super::withholding::{parse_withholding_csv, Source};
 use super::{manifest_json, merge_records, write_ndjson_gz, write_shards, write_sqlite};
 use anyhow::{Context, Result};
 use flate2::read::GzDecoder;
@@ -41,7 +42,7 @@ fn build_fixture_dataset(out: &Path) -> Result<Vec<super::transform::Record>> {
     let suspended = parse_csv(SUSPENDED_FIXTURE.as_bytes(), Status::Suspended)?;
     assert_eq!(active.data_date.as_deref(), Some("28-OCT-26"));
     assert_eq!(suspended.data_date.as_deref(), Some("28-OCT-26"));
-    let records = merge_records(suspended.records, active.records);
+    let records = merge_records(vec![suspended.records, active.records]);
     write_shards(&records, out, 32)?;
     write_ndjson_gz(&records, &out.join("ubn.ndjson.gz"))?;
     write_sqlite(&records, &out.join("ubn.sqlite"))?;
@@ -67,15 +68,14 @@ fn manifest_keeps_attribution_and_incremental_delta() -> Result<()> {
         deletes: vec!["10000009".into()],
         unchanged: 3,
     };
-    let manifest = manifest_json(
-        Some("28-OCT-26"),
-        IncludedSource::Loaded(Some("28-OCT-26")),
-        11,
-        32,
-        "2026-10-27T22:00:00Z",
-        &delta,
-        true,
-    )?;
+    let sources = Sources {
+        active: Some("28-OCT-26"),
+        suspended: IncludedSource::Loaded(Some("28-OCT-26")),
+        nonprofit: IncludedSource::Skipped,
+        school: IncludedSource::Skipped,
+        agency: IncludedSource::Skipped,
+    };
+    let manifest = manifest_json(&sources, 11, 32, "2026-10-27T22:00:00Z", &delta, true)?;
     let statement = manifest["attribution"]["statement"]
         .as_str()
         .context("statement")?;
@@ -107,6 +107,7 @@ fn fixture_rows_survive_ndjson_sqlite_and_shards() -> Result<()> {
     assert_eq!(row["name"], "惜緣農業資材行");
     assert_eq!(row["use_invoice"], true);
     assert_eq!(row["status"], "suspended");
+    assert_eq!(row["kind"], "business");
     assert_eq!(row["suspension_date"], "1150101");
     assert_eq!(row["suspension_date_iso"], "2026-01-01");
     assert_eq!(row["industries"][0]["code"], "462011");
@@ -152,6 +153,7 @@ fn fixture_rows_survive_ndjson_sqlite_and_shards() -> Result<()> {
     assert_eq!(shard_row["useInvoice"], true);
     assert_eq!(shard_row["name"], "惜緣農業資材行");
     assert_eq!(shard_row["status"], "suspended");
+    assert_eq!(shard_row["kind"], "business");
 
     let active_bucket = shard_of("47588972", 32);
     let active_shard: serde_json::Value = serde_json::from_str(&fs::read_to_string(
@@ -181,7 +183,7 @@ fn active_row_replaces_a_suspended_duplicate() -> Result<()> {
         .records
         .retain(|r| r.ban == ban || r.ban == "47522228");
 
-    let merged = merge_records(suspended.records, active.records);
+    let merged = merge_records(vec![suspended.records, active.records]);
     let row = merged.iter().find(|r| r.ban == ban).unwrap();
     assert_eq!(row.status, "active");
     assert_eq!(row.name, "營業中同號");
@@ -189,5 +191,99 @@ fn active_row_replaces_a_suspended_duplicate() -> Result<()> {
     assert!(merged
         .iter()
         .any(|r| r.ban == "47522228" && r.status == "suspended"));
+    Ok(())
+}
+
+const NONPROFIT_FIXTURE: &str = include_str!("../fixtures/bgmopen99_sample.csv");
+const SCHOOL_FIXTURE: &str = include_str!("../fixtures/bgmopen99x_sample.csv");
+const AGENCY_FIXTURE: &str = include_str!("../fixtures/agency_sample.csv");
+
+/// The layer order `main` uses: agency < nonprofit < school < suspended < active.
+fn merge_all() -> Result<Vec<super::transform::Record>> {
+    let active = parse_csv(ACTIVE_FIXTURE.as_bytes(), Status::Active)?;
+    let suspended = parse_csv(SUSPENDED_FIXTURE.as_bytes(), Status::Suspended)?;
+    let nonprofit = parse_withholding_csv(NONPROFIT_FIXTURE.as_bytes(), Source::Nonprofit)?;
+    let school = parse_withholding_csv(SCHOOL_FIXTURE.as_bytes(), Source::School)?;
+    let mut agency = parse_withholding_csv(AGENCY_FIXTURE.as_bytes(), Source::Agency)?;
+    // Upstream, all 66 business/withholding overlaps are agency UBNs that are
+    // also VAT-registered. Make one fixture agency share a business UBN.
+    let mut overlap = agency.records[0].clone();
+    overlap.ban = "47588972".into();
+    agency.records.push(overlap);
+    Ok(merge_records(vec![
+        agency.records,
+        nonprofit.records,
+        school.records,
+        suspended.records,
+        active.records,
+    ]))
+}
+
+#[test]
+fn merge_precedence_business_then_school_nonprofit_agency() -> Result<()> {
+    let merged = merge_all()?;
+    let by = |ban: &str| merged.iter().find(|r| r.ban == ban).unwrap();
+
+    // The business registry beats every withholding set.
+    let biz = by("47588972");
+    assert_eq!(biz.kind, "business");
+    assert!(biz.use_invoice);
+    // In BGMOPEN99 and BGMOPEN99X: the school row wins.
+    assert_eq!(by("00516203").kind, "school");
+    // In BGMOPEN99X and the agency list: the school row (it has a status) wins.
+    assert_eq!(by("03703406").kind, "school");
+    // Only in one set: keeps that set's kind and status.
+    assert_eq!(by("03732303").kind, "agency");
+    assert_eq!(by("10253329").kind, "nonprofit");
+    assert_eq!(by("10253329").status, "closed");
+    assert_eq!(by("00532072").status, "closed");
+
+    // One row per UBN, sorted.
+    let bans: Vec<&str> = merged.iter().map(|r| r.ban.as_str()).collect();
+    let mut sorted = bans.clone();
+    sorted.sort();
+    sorted.dedup();
+    assert_eq!(bans, sorted);
+    // 11 business + 7 nonprofit + 5 school + 5 agency, minus the 3 overlaps.
+    assert_eq!(merged.len(), 25);
+    Ok(())
+}
+
+#[test]
+fn withholding_rows_reach_ndjson_sqlite_and_shards() -> Result<()> {
+    let dir = TempDir::new();
+    let records = merge_all()?;
+    write_shards(&records, &dir.0, 32)?;
+    write_ndjson_gz(&records, &dir.0.join("ubn.ndjson.gz"))?;
+    write_sqlite(&records, &dir.0.join("ubn.sqlite"))?;
+
+    let row = ndjson_by_ban(&dir.0.join("ubn.ndjson.gz"), "00831856")?;
+    assert_eq!(row["kind"], "nonprofit");
+    assert_eq!(row["status"], "closed");
+    assert_eq!(row["use_invoice"], false);
+    assert_eq!(row["address"], "基隆市");
+
+    let conn = Connection::open(dir.0.join("ubn.sqlite"))?;
+    let (kind, status): (String, String) = conn.query_row(
+        "SELECT kind, status FROM ubn WHERE ban = ?1",
+        params!["00532072"],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    assert_eq!((kind.as_str(), status.as_str()), ("school", "closed"));
+
+    let bucket = shard_of("03732303", 32);
+    let shard: serde_json::Value = serde_json::from_str(&fs::read_to_string(
+        dir.0.join("shards").join(format!("{bucket}.json")),
+    )?)?;
+    let shard_row = shard
+        .as_array()
+        .context("shard is an array")?
+        .iter()
+        .find(|r| r["ban"] == "03732303")
+        .context("shard contains 03732303")?;
+    assert_eq!(shard_row["kind"], "agency");
+    assert_eq!(shard_row["name"], "財政部");
+    assert_eq!(shard_row["useInvoice"], false);
+    assert_eq!(shard_row["status"], "active");
     Ok(())
 }

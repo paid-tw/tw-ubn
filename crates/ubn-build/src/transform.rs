@@ -22,6 +22,9 @@ use ubn_core::roc_to_iso;
 pub enum Status {
     Active,
     Suspended,
+    /// Deregistered (註銷 / 撤銷 / 擅自歇業). Only the withholding-unit files
+    /// carry it; no business-registry file holds closed rows.
+    Closed,
 }
 
 impl Status {
@@ -29,6 +32,29 @@ impl Status {
         match self {
             Status::Active => "active",
             Status::Suspended => "suspended",
+            Status::Closed => "closed",
+        }
+    }
+}
+
+/// Which register a UBN came from. Business rows are VAT-registered
+/// (`BGMOPEN1` / `BGMOPEN1X`); the rest are withholding units that hold a UBN
+/// without being a business (see `withholding.rs`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    Business,
+    Nonprofit,
+    School,
+    Agency,
+}
+
+impl Kind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Kind::Business => "business",
+            Kind::Nonprofit => "nonprofit",
+            Kind::School => "school",
+            Kind::Agency => "agency",
         }
     }
 }
@@ -51,6 +77,8 @@ pub struct Record {
     pub org_type: String,
     pub use_invoice: bool,
     pub status: &'static str,
+    /// `Kind::as_str()`: which register the row came from.
+    pub kind: &'static str,
     /// ROC date from `停業日期`. Null when that column is absent (active
     /// file) or the cell is blank.
     pub suspension_date: Option<String>,
@@ -64,6 +92,9 @@ pub struct Record {
 /// that omit the field; readers must treat a missing `status` as unknown,
 /// not as active. `suspension_date` is intentionally not copied here — it
 /// lives on the full dataset (`ubn.ndjson.gz`, `ubn.sqlite`) only.
+///
+/// `kind` was added with the withholding-unit sources. Shards built before
+/// that omit it; a missing `kind` means unknown.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct ShardRecord {
     pub ban: String,
@@ -72,6 +103,7 @@ pub struct ShardRecord {
     #[serde(rename = "useInvoice")]
     pub use_invoice: bool,
     pub status: &'static str,
+    pub kind: &'static str,
 }
 
 impl Record {
@@ -82,6 +114,7 @@ impl Record {
             address: self.address.clone(),
             use_invoice: self.use_invoice,
             status: self.status,
+            kind: self.kind,
         }
     }
 }
@@ -147,10 +180,11 @@ struct Columns {
     industries: [(usize, usize); 4],
 }
 
-fn expected_columns(status: Status) -> &'static [&'static str] {
+fn expected_columns(status: Status) -> Result<&'static [&'static str]> {
     match status {
-        Status::Active => ACTIVE_COLUMNS,
-        Status::Suspended => SUSPENDED_COLUMNS,
+        Status::Active => Ok(ACTIVE_COLUMNS),
+        Status::Suspended => Ok(SUSPENDED_COLUMNS),
+        Status::Closed => bail!("no FIA business-registry file holds closed rows"),
     }
 }
 
@@ -166,23 +200,26 @@ fn header_names(header: &csv::StringRecord) -> Result<Vec<String>> {
     Ok(names)
 }
 
-fn resolve_columns(header: &csv::StringRecord, status: Status) -> Result<Columns> {
+/// Map each header name to its index, requiring the header to be exactly the
+/// `expected` set (no missing, extra, duplicate or empty names). `file` names
+/// the file in the error message.
+pub(crate) fn index_columns(
+    header: &csv::StringRecord,
+    expected: &[&str],
+    file: &str,
+) -> Result<HashMap<String, usize>> {
     let names = header_names(header)?;
-    let mut index: HashMap<&str, usize> = HashMap::with_capacity(names.len());
+    let mut index: HashMap<String, usize> = HashMap::with_capacity(names.len());
     for (i, name) in names.iter().enumerate() {
-        if index.insert(name.as_str(), i).is_some() {
-            bail!(
-                "unexpected FIA CSV header for {} file: duplicate column {name:?}",
-                status.as_str()
-            );
+        if index.insert(name.clone(), i).is_some() {
+            bail!("unexpected FIA CSV header for {file} file: duplicate column {name:?}");
         }
     }
 
-    let expected = expected_columns(status);
     let missing: Vec<&str> = expected
         .iter()
         .copied()
-        .filter(|name| !index.contains_key(name))
+        .filter(|name| !index.contains_key(*name))
         .collect();
     let unexpected: Vec<&str> = names
         .iter()
@@ -191,14 +228,17 @@ fn resolve_columns(header: &csv::StringRecord, status: Status) -> Result<Columns
         .collect();
     if !missing.is_empty() || !unexpected.is_empty() {
         bail!(
-            "unexpected FIA CSV header for {} file.\n  missing: {}\n  unexpected: {}\n  got: {}",
-            status.as_str(),
+            "unexpected FIA CSV header for {file} file.\n  missing: {}\n  unexpected: {}\n  got: {}",
             join_or_none(&missing),
             join_or_none(&unexpected),
             names.join(", "),
         );
     }
+    Ok(index)
+}
 
+fn resolve_columns(header: &csv::StringRecord, status: Status) -> Result<Columns> {
+    let index = index_columns(header, expected_columns(status)?, status.as_str())?;
     let col = |name: &str| index[name];
     Ok(Columns {
         address: col("營業地址"),
@@ -226,7 +266,7 @@ fn join_or_none(items: &[&str]) -> String {
     }
 }
 
-fn cell(rec: &csv::StringRecord, idx: usize) -> String {
+pub(crate) fn cell(rec: &csv::StringRecord, idx: usize) -> String {
     rec.get(idx).unwrap_or("").trim().to_string()
 }
 
@@ -283,6 +323,7 @@ pub fn parse_csv<R: std::io::Read>(reader: R, status: Status) -> Result<Parsed> 
             org_type: cell(&r, cols.org_type),
             use_invoice: cell(&r, cols.use_invoice) == "Y",
             status: status.as_str(),
+            kind: Kind::Business.as_str(),
             suspension_date,
             industries,
         });
@@ -424,6 +465,7 @@ mod tests {
         assert_eq!(p.data_date.as_deref(), Some("28-OCT-26"));
         assert_eq!(p.records.len(), 5);
         assert!(p.records.iter().all(|r| r.status == "active"));
+        assert!(p.records.iter().all(|r| r.kind == "business"));
         assert!(p.records.iter().all(|r| r.suspension_date.is_none()));
 
         let uses_invoice = p.records.iter().filter(|r| r.use_invoice).count();
