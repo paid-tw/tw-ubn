@@ -18,3 +18,40 @@ const PRIVATE_USE = /\p{Co}/u;
 export function hasPrivateUse(s: string): boolean {
   return PRIVATE_USE.test(s);
 }
+
+/**
+ * Normalize a title for comparison only (never for display or submission).
+ * See `isSameTitle` for the rules.
+ */
+function normalizeTitle(s: string): string {
+  return s
+    .normalize('NFKC')
+    .replace(/臺/g, '台')
+    .replace(/\s+/gu, '')
+    .toLowerCase();
+}
+
+/**
+ * True when two invoice titles name the same entity once incidental typing
+ * differences are ignored — e.g. a buyer-typed title vs the registered name.
+ *
+ * It ignores:
+ * - full-width vs half-width forms (Unicode NFKC: `ＡＢＣ１２３` = `ABC123`,
+ *   `（股）` = `(股)`);
+ * - 臺 vs 台;
+ * - all whitespace, including the full-width space U+3000 and spaces between
+ *   words;
+ * - Latin letter case (`ABC` = `abc`), since registered names and what buyers
+ *   type differ in case freely.
+ *
+ * It deliberately does NOT:
+ * - strip or abbreviate legal forms (`股份有限公司` ≠ `(股)公司` ≠ `公司`);
+ * - drop punctuation other than what NFKC unifies (`A.B` ≠ `AB`);
+ * - map other variant characters (only 臺/台) or Private Use Area glyphs;
+ * - treat an empty title as matching anything — two titles that normalize to
+ *   the empty string compare as different.
+ */
+export function isSameTitle(a: string, b: string): boolean {
+  const na = normalizeTitle(a);
+  return na !== '' && na === normalizeTitle(b);
+}
