@@ -74,7 +74,10 @@ export async function lookupTitle(
   if (!validateUBN(ban)) return null;
   if (opts.signal?.aborted) return null;
 
-  const doFetch = opts.fetchImpl ?? fetch;
+  // `typeof` so a runtime without a global fetch (e.g. Node 18 with
+  // --no-experimental-fetch) gets "no answer" instead of a ReferenceError.
+  const doFetch = opts.fetchImpl ?? (typeof fetch === 'function' ? fetch : undefined);
+  if (!doFetch) return null;
   const url = `${opts.baseUrl.replace(/\/+$/, '')}/v1/vat/${ban}`;
 
   // Combine the caller's signal with the timeout by hand: AbortSignal.any is

@@ -150,6 +150,19 @@ describe('lookupTitle returns null (no answer)', () => {
     await expect(lookupTitle(BAN, { baseUrl: BASE, fetchImpl })).resolves.toBeNull();
   });
 
+  it('when no fetchImpl is given and there is no global fetch', async () => {
+    // Delete (not set to undefined) so a bare `fetch` reference would throw
+    // ReferenceError, as on a runtime that never defined it.
+    const g = globalThis as { fetch?: typeof fetch };
+    const saved = g.fetch;
+    delete g.fetch;
+    try {
+      await expect(lookupTitle(BAN, { baseUrl: BASE })).resolves.toBeNull();
+    } finally {
+      g.fetch = saved;
+    }
+  });
+
   it('on a fetch that rejects with AbortError', async () => {
     const fetchImpl = vi.fn(async () => {
       throw new DOMException('aborted', 'AbortError');
