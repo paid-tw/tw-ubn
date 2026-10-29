@@ -314,3 +314,56 @@ describe('cache is populated CORS-free', () => {
     expect(stored.headers.get('Vary')).toBeNull();
   });
 });
+
+describe('D1 row mapping', () => {
+  const rowDb = (row: Record<string, unknown>) =>
+    ({ prepare: () => ({ bind: () => ({ first: () => Promise.resolve(row) }) }) }) as unknown as D1Database;
+
+  it('passes kind and the private-use flag through', async () => {
+    const res = await worker.fetch(
+      new Request('https://w/v1/vat/02409186'),
+      {
+        UBN_DB: rowDb({
+          ban: '02409186',
+          name: '財團法人大三\u{F961C}慈惠寺',
+          address: '臺中市',
+          use_invoice: 0,
+          status: 'active',
+          kind: 'nonprofit',
+          name_has_private_use: 1,
+          setup_date_iso: null,
+        }),
+      },
+      ctx,
+    );
+    expect(await res.json()).toMatchObject({
+      found: true,
+      kind: 'nonprofit',
+      nameHasPrivateUse: true,
+      useInvoice: false,
+      source: 'dataset',
+    });
+  });
+
+  it('omits the flag for unflagged and pre-column (NULL) rows', async () => {
+    for (const flag of [0, null]) {
+      const res = await worker.fetch(
+        new Request('https://w/v1/vat/22099131'),
+        {
+          UBN_DB: rowDb({
+            ban: '22099131',
+            name: '台灣積體電路製造股份有限公司',
+            use_invoice: 1,
+            status: 'active',
+            kind: null,
+            name_has_private_use: flag,
+          }),
+        },
+        ctx,
+      );
+      const body = (await res.json()) as Record<string, unknown>;
+      expect('nameHasPrivateUse' in body).toBe(false);
+      expect('kind' in body).toBe(false);
+    }
+  });
+});

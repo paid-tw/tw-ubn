@@ -116,7 +116,7 @@ async function fromD1(ban: string, env: Env): Promise<Lookup<UBNResult | null>> 
   let row: Record<string, unknown> | null;
   try {
     row = await env.UBN_DB.prepare(
-      'SELECT ban, name, address, use_invoice, status, kind, setup_date_iso FROM ubn WHERE ban = ?',
+      'SELECT ban, name, address, use_invoice, status, kind, name_has_private_use, setup_date_iso FROM ubn WHERE ban = ?',
     )
       .bind(ban)
       .first<Record<string, unknown>>();
@@ -135,6 +135,8 @@ async function fromD1(ban: string, env: Env): Promise<Lookup<UBNResult | null>> 
       useInvoice: !!(row.use_invoice as number),
       status: row.status as RegistryStatus,
       kind: (row.kind as RegistryKind | null) ?? undefined,
+      // NULL on rows loaded before the column existed: same as false.
+      ...(row.name_has_private_use ? { nameHasPrivateUse: true as const } : {}),
       setupDate: (row.setup_date_iso as string) ?? null,
       source: 'dataset',
     },

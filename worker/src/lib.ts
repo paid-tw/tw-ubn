@@ -60,6 +60,12 @@ export interface ShardRow {
   status?: RegistryStatus;
   /** Omitted on shards built before the withholding-unit sources; missing means unknown. */
   kind?: RegistryKind;
+  /**
+   * Present (and `true`) only when `name` holds a Unicode Private Use Area
+   * character (the registry's 造字), which most fonts render as a box. Absent
+   * means false; don't autofill such a name as an invoice title as is.
+   */
+  nameHasPrivateUse?: true;
 }
 
 export interface UBNResult {
@@ -73,6 +79,8 @@ export interface UBNResult {
   status?: RegistryStatus;
   /** Carried from the shard when present. See `ShardRow.kind`. */
   kind?: RegistryKind;
+  /** Carried from the shard; only ever `true`. See `ShardRow.nameHasPrivateUse`. */
+  nameHasPrivateUse?: true;
   source?: 'dataset' | 'fia-api' | 'gcis';
   /** GCIS only: the raw `Company_Status_Desc`, e.g. 核准設立 / 解散. */
   companyStatus?: string;
@@ -90,6 +98,7 @@ export function datasetResult(row: ShardRow): UBNResult {
     useInvoice: row.useInvoice,
     status: row.status,
     kind: row.kind,
+    ...(row.nameHasPrivateUse ? { nameHasPrivateUse: true as const } : {}),
     source: 'dataset',
   };
 }
