@@ -6,15 +6,17 @@ import { shardOf, DEFAULT_SHARDS } from './shard.js';
  *
  * - `active` — operating (營業中).
  * - `suspended` — temporarily suspended (停業), from `BGMOPEN1X`.
- * - `closed` — dissolved / deregistered (歇業、撤銷、廢止 等). The static shards
- *   only carry `active` and `suspended`; `closed` comes from the live sources
- *   the Worker consults (FIA per-record API / GCIS).
+ * - `closed` — dissolved / deregistered (歇業、撤銷、廢止 等). On shards this
+ *   marks deregistered schools and nonprofits (withholding units); the Worker
+ *   also returns it for terminated companies it finds in GCIS.
  */
 export type RegistryStatus = 'active' | 'suspended' | 'closed';
 
 /**
- * What kind of entity holds the number. Optional: absent means unknown
- * (treat it like `business` unless you have a reason not to).
+ * Which register the UBN came from: a VAT-registered `business`, or a
+ * withholding unit — `nonprofit`, `school` or `agency` (these have
+ * `useInvoice: false`). Optional on records: absent means unknown (shards built
+ * before the withholding-unit sources).
  */
 export type RegistryKind = 'business' | 'nonprofit' | 'school' | 'agency';
 
@@ -30,7 +32,8 @@ export interface UBNRecord {
    * `active`, `suspended` or `closed`.
    *
    * Shards built by the header-driven pipeline carry `active` / `suspended`
-   * (from `BGMOPEN1` / `BGMOPEN1X`). Shards published before that omit
+   * (from `BGMOPEN1` / `BGMOPEN1X`), and `closed` for deregistered withholding
+   * units. Shards published before that omit
    * `status`; a missing value means unknown — do not treat it as active. The
    * suspension date itself is not on the shard; it is only in the full dataset
    * (`ubn.ndjson.gz` / `ubn.sqlite`).
