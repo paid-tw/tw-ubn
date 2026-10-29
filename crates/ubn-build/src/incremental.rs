@@ -210,7 +210,7 @@ pub fn write_changed_shards(records: &[Record], d: &Diff, shards: u32, path: &Pa
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transform::{Record, Status};
+    use crate::transform::{Kind, Record, Status};
 
     fn rec(ban: &str, name: &str) -> Record {
         Record {
@@ -223,6 +223,7 @@ mod tests {
             org_type: "獨資".into(),
             use_invoice: false,
             status: Status::Active.as_str(),
+            kind: Kind::Business.as_str(),
             suspension_date: None,
             suspension_date_iso: None,
             industries: vec![],
