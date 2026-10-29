@@ -42,7 +42,7 @@ ship when merged to `main`.
   checkout data ([#21](https://github.com/paid-tw/tw-ubn/pull/21)).
 - `lookupTitle(ban, { baseUrl, signal?, timeoutMs?, fetchImpl? })` queries a
   deployed Worker's `/v1/vat/:ban` and resolves to `{ found: true, name, status?, … }`,
-  `{ found: false }` (the Worker says there is no such registration), or `null`
+  `{ found: false }` (no source has a record — a hint, not an invalid UBN), or `null`
   (no answer: bad checksum, timeout, abort, network error, any non-2xx including
   `502 upstream_unavailable`, a malformed body, or a name that is empty or has
   Private Use Area glyphs). Unlike `lookupVAT`, it never throws

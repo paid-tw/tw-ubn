@@ -34,7 +34,11 @@ export interface TitleFound {
   setupDate?: string;
 }
 
-/** The number is well-formed but no registration exists for it. */
+/**
+ * The number is well-formed but no public source (dataset, FIA, GCIS) has a
+ * record of it. This does NOT mean the UBN is invalid: many withholding-unit
+ * UBNs (clinics, professional practices, …) have no public record.
+ */
 export interface TitleNotFound {
   found: false;
 }
@@ -54,8 +58,9 @@ const SOURCES: readonly string[] = ['dataset', 'fia-api', 'gcis'];
  * - `{ found: true, name, status?, ... }` — a registration with a usable name.
  *   `status` may be `suspended` or `closed`; deciding what to do with those is
  *   up to the caller.
- * - `{ found: false }` — the Worker answered authoritatively that no
- *   registration exists. Only then is it right to tell the buyer "not found".
+ * - `{ found: false }` — the Worker answered, and no source it consulted has a
+ *   record. Not proof of an invalid UBN (see the README's "Reading a lookup"):
+ *   use it for a "please double-check" hint at most, never to block checkout.
  * - `null` — no answer. Show nothing and let the buyer type the title. This
  *   covers: a malformed UBN or bad checksum (no request is made), a timeout,
  *   the caller's signal aborting, a network error, any non-2xx response

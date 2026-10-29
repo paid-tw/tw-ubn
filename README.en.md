@@ -93,7 +93,8 @@ if (r === null) {
   // for an upstream outage), or an unusable name (empty, PUA glyphs).
   // Show nothing; let the buyer type the title.
 } else if (!r.found) {
-  // the Worker says no such registration — only now ask the buyer to recheck.
+  // no source has this UBN. Not the same as invalid (see "Reading a lookup"
+  // below): at most a "please double-check" hint; never block checkout.
 } else {
   fillTitle(r.name);                     // r.status may be 'suspended' / 'closed'; your call
 }
