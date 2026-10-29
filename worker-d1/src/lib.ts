@@ -33,6 +33,8 @@ export interface UBNResult {
   address?: string;
   useInvoice?: boolean;
   status?: string;
+  /** `business` | `nonprofit` | `school` | `agency`; unset on rows loaded before `kind` existed. */
+  kind?: string;
   setupDate?: string | null;
   source?: 'dataset' | 'fia-api';
 }

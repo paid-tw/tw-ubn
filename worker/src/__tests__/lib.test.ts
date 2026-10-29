@@ -34,8 +34,18 @@ describe('worker lib parity with ubn-core', () => {
       source: 'dataset',
     });
 
+    const closedSchool = datasetResult({
+      ban: '00532072',
+      name: '臺北市私立陽光森林麗湖幼兒園',
+      useInvoice: false,
+      status: 'closed',
+      kind: 'school',
+    });
+    expect(closedSchool).toMatchObject({ status: 'closed', kind: 'school', useInvoice: false });
+
     const legacy = datasetResult({ ban: '22099131', name: '台積電', useInvoice: true });
     expect(legacy.status).toBeUndefined();
+    expect(legacy.kind).toBeUndefined();
     expect(JSON.parse(JSON.stringify(legacy)).status).toBeUndefined();
   });
 

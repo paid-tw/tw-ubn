@@ -36,7 +36,10 @@ export function rocToISO(roc: string | null | undefined): string | null {
   return `${year}-${mm}-${dd}`;
 }
 
-export type RegistryStatus = 'active' | 'suspended';
+export type RegistryStatus = 'active' | 'suspended' | 'closed';
+
+/** Which register the UBN came from: VAT business or a withholding unit. */
+export type RegistryKind = 'business' | 'nonprofit' | 'school' | 'agency';
 
 /** One object inside a published `shards/<n>.json` file. */
 export interface ShardRow {
@@ -49,6 +52,8 @@ export interface ShardRow {
    * unknown, not active. The suspension date is not part of the shard.
    */
   status?: RegistryStatus;
+  /** Omitted on shards built before the withholding-unit sources; missing means unknown. */
+  kind?: RegistryKind;
 }
 
 export interface UBNResult {
@@ -60,10 +65,12 @@ export interface UBNResult {
   setupDate?: string | null;
   /** Carried from the shard when present. See `ShardRow.status`. */
   status?: RegistryStatus;
+  /** Carried from the shard when present. See `ShardRow.kind`. */
+  kind?: RegistryKind;
   source?: 'dataset' | 'fia-api';
 }
 
-/** Map a dataset shard row onto the lookup result, including `status` when the shard has it. */
+/** Map a dataset shard row onto the lookup result, including `status` / `kind` when the shard has them. */
 export function datasetResult(row: ShardRow): UBNResult {
   return {
     found: true,
@@ -72,6 +79,7 @@ export function datasetResult(row: ShardRow): UBNResult {
     address: row.address,
     useInvoice: row.useInvoice,
     status: row.status,
+    kind: row.kind,
     source: 'dataset',
   };
 }

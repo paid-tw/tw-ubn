@@ -95,7 +95,7 @@ async function fromD1(ban: string, env: Env): Promise<Lookup<UBNResult | null>> 
   let row: Record<string, unknown> | null;
   try {
     row = await env.UBN_DB.prepare(
-      'SELECT ban, name, address, use_invoice, status, setup_date_iso FROM ubn WHERE ban = ?',
+      'SELECT ban, name, address, use_invoice, status, kind, setup_date_iso FROM ubn WHERE ban = ?',
     )
       .bind(ban)
       .first<Record<string, unknown>>();
@@ -113,6 +113,7 @@ async function fromD1(ban: string, env: Env): Promise<Lookup<UBNResult | null>> 
       address: row.address as string,
       useInvoice: !!(row.use_invoice as number),
       status: row.status as string,
+      kind: (row.kind as string | null) ?? undefined,
       setupDate: (row.setup_date_iso as string) ?? null,
       source: 'dataset',
     },
