@@ -5,7 +5,12 @@ on:
     # 23:30 UTC (~07:30 Asia/Taipei). MOF re-publishes the active zip ~21:00 UTC,
     # so running later avoids picking up the previous day's extract.
     - cron: '30 23 * * *'
-  workflow_dispatch: {} # manual trigger + keeps the schedule from auto-pausing
+  workflow_dispatch: # manual trigger + keeps the schedule from auto-pausing
+    inputs:
+      allow_shrink:
+        description: Publish even if rows dropped more than the sanity-check limit (intentional shrink)
+        type: boolean
+        default: false
 
 permissions:
   contents: write # create releases / upload assets
@@ -42,6 +47,16 @@ jobs:
           else
             echo "no previous state (first run) — delta will be a full load"
           fi
+          # Previous manifest, for the row-count sanity check. Once data-latest
+          # exists it must carry manifest.json, so a failed download fails the run
+          # instead of silently skipping the check.
+          if gh release view data-latest >/dev/null 2>&1; then
+            if gh release view data-latest --json assets -q '.assets[].name' | grep -qx manifest.json; then
+              gh release download data-latest --pattern manifest.json --dir prev
+            else
+              echo "data-latest has no manifest.json; sanity check will treat this as a first run"
+            fi
+          fi
 
       - name: Build pipeline
         run: cargo build --release -p ubn-build
@@ -55,6 +70,16 @@ jobs:
           echo "date=$(jq -r .dataDate dist/manifest.json)" >> "$GITHUB_OUTPUT"
           echo "tag=data-$(date +%Y%m%d)" >> "$GITHUB_OUTPUT"
           echo "delta=$(jq -c .delta dist/manifest.json)" >> "$GITHUB_OUTPUT"
+
+      # Gate: nothing below (release, data-latest state, D1, R2 latest.json) runs
+      # if the new build lost more than MAX_DROP_PCT of the previous rows, has
+      # no rows, or has a malformed manifest. Override an intentional shrink by
+      # running the workflow manually with allow_shrink; schedules can't set it.
+      - name: Sanity check
+        env:
+          ALLOW_SHRINK: ${{ inputs.allow_shrink == true }}
+          MAX_DROP_PCT: ${{ vars.DATASET_MAX_DROP_PCT }} # repo variable; empty = 1
+        run: node scripts/check-dataset.mjs dist/manifest.json prev/manifest.json
 
       # Full artifacts + the delta/state -> a dated GitHub Release, and the
       # rolling `data-latest` keeps the fresh state.tsv.gz for tomorrow's diff.
