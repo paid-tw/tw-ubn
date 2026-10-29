@@ -30,7 +30,7 @@
 //! the county or city (`機關所在縣市`) for nonprofits and schools — the only
 //! location these files give — and empty for agencies.
 
-use crate::transform::{cell, index_columns, Kind, Parsed, Record, Status};
+use crate::transform::{cell, has_private_use, index_columns, Kind, Parsed, Record, Status};
 use anyhow::Result;
 use std::collections::HashSet;
 
@@ -120,9 +120,11 @@ pub fn parse_withholding_csv<R: std::io::Read>(reader: R, source: Source) -> Res
             continue;
         }
         let status = reason_col.map_or(Status::Active, |i| status_of_reason(&cell(&r, i)));
+        let name = cell(&r, name_col);
         records.push(Record {
             ban,
-            name: cell(&r, name_col),
+            name_has_private_use: has_private_use(&name),
+            name,
             address: city_col.map(|i| cell(&r, i)).unwrap_or_default(),
             capital: String::new(),
             setup_date: String::new(),

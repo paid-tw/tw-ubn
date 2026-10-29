@@ -231,6 +231,7 @@ mod tests {
             use_invoice: false,
             status: Status::Active.as_str(),
             kind: Kind::Business.as_str(),
+            name_has_private_use: false,
             suspension_date: None,
             suspension_date_iso: None,
             industries: vec![],
