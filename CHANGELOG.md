@@ -11,6 +11,16 @@ ship when merged to `main`.
 
 ## [Unreleased]
 
+### Added
+
+- `worker`, `worker-d1`: when a ban is in neither the dataset nor FIA, look it up
+  in the GCIS company registry. A dissolved, revoked or otherwise terminated
+  company now answers `found: true` with `source: "gcis"`, `status: "closed"`,
+  `closedDate` and the raw `companyStatus`, instead of a bare `found: false`; a
+  live company not in the tax registry answers with its name and no `status`. New
+  `NEGATIVE_CACHE_TTL` var (default 3600 s) for misses GCIS can't confirm
+  ([#16](https://github.com/paid-tw/tw-ubn/pull/16)).
+
 ### Fixed
 
 - `worker-d1`: fall back to the FIA API when D1 has no `ubn` table yet, instead of
