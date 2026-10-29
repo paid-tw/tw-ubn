@@ -1,5 +1,5 @@
 import { validateUBN } from './checksum.js';
-import type { EntityKind, RegistryStatus } from './lookup.js';
+import type { RegistryKind, RegistryStatus } from './lookup.js';
 import { hasPrivateUse } from './title.js';
 
 export interface LookupTitleOptions {
@@ -26,7 +26,7 @@ export interface TitleFound {
   status?: RegistryStatus;
   address?: string;
   useInvoice?: boolean;
-  kind?: EntityKind;
+  kind?: RegistryKind;
   source?: TitleSource;
   /** Company status text from GCIS (公司狀態), when the Worker has it. */
   companyStatus?: string;
@@ -127,7 +127,7 @@ function parse(body: unknown, ban: string): TitleLookupResult | null {
   }
   if (typeof b.address === 'string') out.address = b.address;
   if (typeof b.useInvoice === 'boolean') out.useInvoice = b.useInvoice;
-  if (typeof b.kind === 'string' && KINDS.includes(b.kind)) out.kind = b.kind as EntityKind;
+  if (typeof b.kind === 'string' && KINDS.includes(b.kind)) out.kind = b.kind as RegistryKind;
   if (typeof b.source === 'string' && SOURCES.includes(b.source)) {
     out.source = b.source as TitleSource;
   }

@@ -16,7 +16,7 @@ export type RegistryStatus = 'active' | 'suspended' | 'closed';
  * What kind of entity holds the number. Optional: absent means unknown
  * (treat it like `business` unless you have a reason not to).
  */
-export type EntityKind = 'business' | 'nonprofit' | 'school' | 'agency';
+export type RegistryKind = 'business' | 'nonprofit' | 'school' | 'agency';
 
 export interface UBNRecord {
   ban: string;
@@ -37,14 +37,15 @@ export interface UBNRecord {
    */
   status?: RegistryStatus;
   /** Entity kind, when the build could tell. Absent means unknown. */
-  kind?: EntityKind;
+  kind?: RegistryKind;
   /**
-   * True when `name` contains Unicode Private Use Area characters (the tax
-   * registry's custom glyphs, 造字). Such a name renders as boxes and should
-   * not be auto-filled as an invoice title. Absent means not flagged — check
-   * with `hasPrivateUse(name)` if you need certainty.
+   * Present (and then always `true`) when `name` contains Unicode Private Use
+   * Area characters (the tax registry's custom glyphs, 造字). Such a name
+   * renders as boxes and should not be auto-filled as an invoice title. Absent
+   * means not flagged — older shards never set it, so check with
+   * `hasPrivateUse(name)` if you need certainty.
    */
-  nameHasPrivateUse?: boolean;
+  nameHasPrivateUse?: true;
 }
 
 export interface LookupOptions {

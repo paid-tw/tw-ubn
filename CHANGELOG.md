@@ -33,8 +33,9 @@ ship when merged to `main`.
 - `hasPrivateUse(s)` reports whether a string contains Unicode Private Use Area
   characters (the registry's custom glyphs), which should not be auto-filled as a
   title ([#14](https://github.com/paid-tw/tw-ubn/pull/14)).
-- Types: `RegistryStatus` adds `'closed'`, and `UBNRecord` gains optional `kind`
-  (`'business' | 'nonprofit' | 'school' | 'agency'`) and `nameHasPrivateUse`
+- Types: `RegistryStatus` adds `'closed'`, a new `RegistryKind`
+  (`'business' | 'nonprofit' | 'school' | 'agency'`), and `UBNRecord` gains
+  optional `kind` and `nameHasPrivateUse` (`true` when present)
   ([#14](https://github.com/paid-tw/tw-ubn/pull/14)).
 
 ### Fixed
