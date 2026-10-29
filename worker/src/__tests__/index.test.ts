@@ -121,6 +121,16 @@ describe('vat lookup: dataset, FIA fallback, and what gets cached', () => {
     expect(put).not.toHaveBeenCalled();
   });
 
+  it('answers 502, uncached, when FIA returns 200 with a non-JSON body', async () => {
+    fia(() => Promise.resolve(new Response('<html>maintenance</html>', { status: 200 })));
+    const res = await lookup(published([]));
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ found: null, ban: '22099131', error: 'upstream_unavailable' });
+    expect(res.headers.get('Cache-Control')).toBe('no-store');
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('https://a.example');
+    expect(put).not.toHaveBeenCalled();
+  });
+
   it('answers 502 when both R2 and FIA fail', async () => {
     fia(() => Promise.reject(new Error('network error')));
     const res = await lookup(failing);
