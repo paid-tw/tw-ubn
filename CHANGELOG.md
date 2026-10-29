@@ -37,6 +37,18 @@ ship when merged to `main`.
   contract: treat a non-2xx as "no answer". `found: false` is cached only when the
   dataset read succeeded and FIA returned 404 ([#15](https://github.com/paid-tw/tw-ubn/pull/15)).
 
+### Security
+
+- Dataset workflow: the `build` job runs in the `dataset` environment, so the R2 /
+  D1 write credentials can be scoped to the default branch once they are moved
+  there; admin steps in `docs/operations.md` ([#13](https://github.com/paid-tw/tw-ubn/pull/13)).
+- Workflows: every action is pinned to a full commit SHA, kept current by
+  Dependabot ([#13](https://github.com/paid-tw/tw-ubn/pull/13)).
+- Dataset workflow: a pre-publish check fails the run before anything is released
+  or written to D1 / R2 when rows drop more than 1% from the previous build, the
+  build has no rows, or a manifest is malformed; a manual run can override an
+  intentional shrink with `allow_shrink` ([#13](https://github.com/paid-tw/tw-ubn/pull/13)).
+
 ## [0.1.1] - 2026-10-28
 
 ### Changed
