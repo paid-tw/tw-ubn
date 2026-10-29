@@ -20,25 +20,30 @@ CDN 快取的請求。
 
 ```
  每日  FIA 稅籍：BGMOPEN1.zip（營業中）+ BGMOPEN1X.csv（停業）
+       FIA 扣繳單位：BGMOPEN99.csv（非營利）+ BGMOPEN99X.csv（學校）+ 行政院機關清單
           │
-          ▼  ubn-build（Rust）：正規化（ROC→西元）、合併並標 status
+          ▼  ubn-build（Rust）：正規化（ROC→西元）、合併並標 status / kind
         dist/
-          ├─ shards/<n>.json   8192 個逐統編分片（ban → name/address/useInvoice/status）
+          ├─ shards/<n>.json   8192 個逐統編分片（ban → name/address/useInvoice/status/kind）
           ├─ ubn.sqlite        完整資料集，統編建索引
           ├─ ubn.ndjson.gz     完整資料集，逐行 JSON
           └─ manifest.json     資料日期、筆數、片數、雜湊、授權
 
  結帳 ─► 你的 CDN（R2 + Cloudflare）─► shards/<bucket>.json   （一個請求、邊緣快取）
-                       查無 ─► Worker ─► FIA 單筆 API（在邊緣快取）
+                       查無 ─► Worker ─► FIA 單筆 API ─► GCIS 公司登記（在邊緣快取）
 ```
 
 - **FIA 稅籍**是主來源：涵蓋所有營業人（公司**與**商號），且帶有**發票抬頭**與**使用
   統一發票**旗標——正是結帳需要的。每日更新。
 - **營業中／停業狀態**由 FIA 自己提供（`BGMOPEN1` + `BGMOPEN1X`），不需要 GCIS。
-  分片上的 `status` 為 `active` 或 `suspended`。較早的分片沒有這個欄位；缺值代表未知，
-  不要當成營業中。停業日期只在完整資料集，不在結帳分片。
-- **GCIS**（公司／商業登記）為選用的逐筆 enrichment（例如負責人）；為何沒有可用的
-  GCIS 全量 master，詳見 [`docs/data-dictionary.md`](docs/data-dictionary.md)。
+  分片上的 `status` 為 `active`、`suspended` 或 `closed`（只有扣繳單位會有，代表已註銷）。
+  較早的分片沒有這個欄位；缺值代表未知，不要當成營業中。停業日期只在完整資料集，不在結帳分片。
+- **扣繳單位**（學校、幼兒園、非營利機關團體、行政院所屬機關）有合法統編但不是營業人，
+  不在稅籍裡；建檔時另外併入，以 `kind`（`business` / `nonprofit` / `school` / `agency`）
+  區分，`useInvoice` 一律為 `false`。
+- **GCIS**（公司登記）沒有可用的全量 master（詳見 [`docs/data-dictionary.md`](docs/data-dictionary.md)），
+  所以只在查詢時用：資料集與 FIA 都查無時，Worker 再查 GCIS，找得到已解散／廢止的公司
+  （`status: "closed"`、`closedDate`），或存續中但不在稅籍的公司。
 - 尚未進入當日快照的新設統編，會 fallback 到**有官方文件的 FIA 單筆 API**，並擺在你
   自己的邊緣快取後面——政府伺服器每個統編每個快取週期最多被打一次，**絕不在每次結帳時**。
 
