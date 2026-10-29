@@ -49,8 +49,9 @@ describe('vat lookup: dataset, FIA fallback, and what gets cached', () => {
   const failing = { get: () => Promise.reject(new Error('R2 internal error')) } as unknown as R2Bucket;
 
   const put = vi.fn(() => Promise.resolve());
-  const fia = (impl: () => Promise<Response>) => {
-    const f = vi.fn(impl);
+  /** Route fetch by host: FIA answers with `impl`, GCIS with `gcis` (default `[]`). */
+  const fia = (impl: () => Promise<Response>, gcis: () => Promise<Response> = () => Promise.resolve(Response.json([]))) => {
+    const f = vi.fn((input: RequestInfo | URL) => (String(input).includes('data.gcis.nat.gov.tw') ? gcis() : impl()));
     vi.stubGlobal('fetch', f);
     return f;
   };
@@ -148,6 +149,87 @@ describe('vat lookup: dataset, FIA fallback, and what gets cached', () => {
     const res = await lookup(failing);
     expect(await res.json()).toMatchObject({ found: true, source: 'fia-api' });
     expect(put).toHaveBeenCalledTimes(1);
+  });
+
+  describe('GCIS fallback after a FIA 404', () => {
+    const FIA_404 = () => Promise.resolve(new Response(null, { status: 404 }));
+    // Field names as returned live by GCIS on 2026-10-29.
+    const dissolved = {
+      Business_Accounting_NO: '22099131',
+      Company_Status_Desc: '解散',
+      Company_Name: '鑫晶生物科技有限公司',
+      Company_Location: '臺北市大同區市民大道1段209號10樓',
+      Revoke_App_Date: '1141124',
+    };
+
+    it('answers a dissolved company as closed, with its termination date, and caches it', async () => {
+      const f = fia(FIA_404, () => Promise.resolve(Response.json([dissolved])));
+      const res = await lookup(published([]));
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        found: true,
+        ban: '22099131',
+        name: '鑫晶生物科技有限公司',
+        address: '臺北市大同區市民大道1段209號10樓',
+        source: 'gcis',
+        companyStatus: '解散',
+        status: 'closed',
+        closedDate: '2025-11-24',
+      });
+      expect(put).toHaveBeenCalledTimes(1);
+      const gcisUrl = String(f.mock.calls[1][0]);
+      expect(gcisUrl).toContain('5F64D864-61CB-4D0D-8AD9-492047CC1EA6');
+      expect(decodeURIComponent(gcisUrl)).toContain('Business_Accounting_NO eq 22099131');
+    });
+
+    it('answers a live company with its name but no tax status', async () => {
+      fia(FIA_404, () =>
+        Promise.resolve(Response.json([{ ...dissolved, Company_Status_Desc: '核准設立', Revoke_App_Date: '' }])),
+      );
+      const res = await lookup(published([]));
+      const body = await res.json();
+      expect(body).toMatchObject({ found: true, source: 'gcis', companyStatus: '核准設立', closedDate: null });
+      expect(body).not.toHaveProperty('status');
+    });
+
+    it('does not consult GCIS when FIA found the ban', async () => {
+      const f = fia(() => Promise.resolve(Response.json(TSMC)));
+      await lookup(published([]));
+      expect(f).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps a cacheable found:false when GCIS returns an empty array', async () => {
+      fia(FIA_404, () => Promise.resolve(Response.json([])));
+      const res = await lookup(published([]));
+      expect(await res.json()).toEqual({ found: false, ban: '22099131' });
+      expect(put).toHaveBeenCalledTimes(1);
+    });
+
+    const unavailable: [string, () => Promise<Response>][] = [
+      ['an HTTP error', () => Promise.resolve(new Response('oops', { status: 500 }))],
+      ['a network error', () => Promise.reject(new Error('network error'))],
+      ['a timeout', () => Promise.reject(new DOMException('timed out', 'TimeoutError'))],
+      ['HTTP 200 with an empty body', () => Promise.resolve(new Response('', { status: 200 }))],
+      ['HTTP 200 with a non-JSON body', () => Promise.resolve(new Response('<html>busy</html>', { status: 200 }))],
+      ['HTTP 200 with a non-array JSON body', () => Promise.resolve(Response.json({ error: 'x' }))],
+    ];
+    for (const [what, gcis] of unavailable) {
+      it(`returns found:false uncached (not a 502) on ${what}`, async () => {
+        fia(FIA_404, gcis);
+        const res = await lookup(published([]));
+        expect(res.status).toBe(200);
+        expect(await res.json()).toEqual({ found: false, ban: '22099131' });
+        expect(res.headers.get('Cache-Control')).toBe('no-store');
+        expect(put).not.toHaveBeenCalled();
+      });
+    }
+
+    it('does not cache a GCIS hit while R2 errored (the dataset might carry the ban)', async () => {
+      fia(FIA_404, () => Promise.resolve(Response.json([dissolved])));
+      const res = await lookup(failing);
+      expect(await res.json()).toMatchObject({ found: true, source: 'gcis', status: 'closed' });
+      expect(put).not.toHaveBeenCalled();
+    });
   });
 });
 

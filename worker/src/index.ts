@@ -1,4 +1,12 @@
-import { datasetResult, normalizeFia, shardOf, validateUBN, type ShardRow, type UBNResult } from './lib';
+import {
+  datasetResult,
+  normalizeFia,
+  normalizeGcis,
+  shardOf,
+  validateUBN,
+  type ShardRow,
+  type UBNResult,
+} from './lib';
 
 export interface Env {
   /** R2 bucket holding the published dataset. Optional; falls back to FIA. */
@@ -12,6 +20,9 @@ export interface Env {
 }
 
 const FIA_API = 'https://eip.fia.gov.tw/OAI/api/businessRegistration';
+const GCIS_COMPANY_API = 'https://data.gcis.nat.gov.tw/od/data/api/5F64D864-61CB-4D0D-8AD9-492047CC1EA6';
+/** GCIS only enriches a miss; don't let a slow GCIS hold the response. */
+const GCIS_TIMEOUT_MS = 3000;
 
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -52,6 +63,15 @@ export default {
       // R2 errored the ban may just be in the unread shard, so don't pin
       // found:false in the cache for a day.
       cacheable = fia.value.found || r2.ok;
+      if (!fia.value.found) {
+        // Not in the tax registry: GCIS may still know the company, closed
+        // (解散/廢止 …, so the caller can say why) or live but unregistered
+        // for tax. GCIS is an enhancement, so its failure never 502s; it only
+        // keeps the FIA-derived found:false out of the cache.
+        const gcis = await fromGcis(ban);
+        if (!gcis.ok) cacheable = false;
+        else if (gcis.value) result = gcis.value;
+      }
     }
     // Cache the response CORS-free (the key is origin-independent and shared by
     // all origins), then apply the caller's CORS per request. This keeps any
@@ -122,6 +142,35 @@ async function fromFia(ban: string): Promise<Lookup<UBNResult>> {
     return { ok: true, value: normalizeFia(ban, (await res.json()) as Record<string, unknown>) };
   } catch (e) {
     console.error('fia returned a non-JSON body', e);
+    return { ok: false };
+  }
+}
+
+/**
+ * GCIS (經濟部商業司) company registration, keyed by `Business_Accounting_NO`.
+ * Companies only (not 商號); no CORS, so it can only be queried server-side.
+ *
+ * Verified live 2026-10-29: a hit is HTTP 200 with a one-element JSON array
+ * carrying `Company_Name`, `Company_Status_Desc`, `Company_Location`,
+ * `Revoke_App_Date` (ROC, e.g. "1141124"; "" for a live company) and more.
+ * A ban GCIS has no record of is ALSO HTTP 200 with `Content-Length: 0` (an
+ * empty body, never `[]`), i.e. the same bytes as the outage mode reported in
+ * #7. We can't tell those apart, so an empty or non-JSON body counts as
+ * unavailable (`ok: false`): the answer is still the FIA-derived found:false,
+ * just not cached. Only a parsed array (`[]` or a row) is authoritative.
+ */
+async function fromGcis(ban: string): Promise<Lookup<UBNResult | null>> {
+  const url = `${GCIS_COMPANY_API}?$format=json&$filter=Business_Accounting_NO eq ${ban}&$skip=0&$top=1`;
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(GCIS_TIMEOUT_MS) });
+    if (!res.ok) return { ok: false };
+    const rows: unknown = JSON.parse(await res.text());
+    if (!Array.isArray(rows)) return { ok: false };
+    const row = rows[0] as Record<string, unknown> | undefined;
+    return { ok: true, value: row ? normalizeGcis(ban, row) : null };
+  } catch (e) {
+    // Network error, timeout, or an empty / non-JSON body.
+    console.error('gcis lookup failed', e);
     return { ok: false };
   }
 }
