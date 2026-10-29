@@ -143,6 +143,19 @@ describe('lookupTitle returns null (no answer)', () => {
     await expect(lookupTitle(BAN, { baseUrl: BASE, fetchImpl: respond(body) })).resolves.toBeNull();
   });
 
+  it('on a non-2xx with a stalled body, cancels the body and aborts the request', async () => {
+    let cancelled = false;
+    const body = new ReadableStream({
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const fetchImpl = vi.fn(async () => new Response(body, { status: 502 })) as unknown as typeof fetch;
+    await expect(lookupTitle(BAN, { baseUrl: BASE, fetchImpl })).resolves.toBeNull();
+    expect(cancelled).toBe(true);
+    expect(vi.mocked(fetchImpl).mock.calls[0][1]?.signal?.aborted).toBe(true);
+  });
+
   it('on a network error', async () => {
     const fetchImpl = vi.fn(async () => {
       throw new TypeError('Failed to fetch');

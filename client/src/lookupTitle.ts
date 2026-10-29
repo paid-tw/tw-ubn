@@ -99,6 +99,10 @@ export async function lookupTitle(
   } finally {
     clearTimeout(timer);
     opts.signal?.removeEventListener('abort', abort);
+    // Abort on every exit, not just on timeout: once we have our answer (or
+    // gave up), any still-open request or response stream is released rather
+    // than left holding a pooled connection. Harmless after a fully-read body.
+    controller.abort();
   }
 }
 
@@ -109,7 +113,12 @@ async function request(
   signal: AbortSignal,
 ): Promise<TitleLookupResult | null> {
   const res = await doFetch(url, { signal });
-  if (!res.ok) return null;
+  if (!res.ok) {
+    // Discard the error body explicitly too, for fetch implementations whose
+    // body stream does not follow the request's signal.
+    res.body?.cancel().catch(() => {});
+    return null;
+  }
   return parse(await res.json(), ban);
 }
 
