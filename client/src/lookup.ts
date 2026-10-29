@@ -1,8 +1,22 @@
 import { validateUBN } from './checksum.js';
 import { shardOf, DEFAULT_SHARDS } from './shard.js';
 
-/** Registry status written onto shards. Older shards omit the field. */
-export type RegistryStatus = 'active' | 'suspended';
+/**
+ * Registry status.
+ *
+ * - `active` — operating (營業中).
+ * - `suspended` — temporarily suspended (停業), from `BGMOPEN1X`.
+ * - `closed` — dissolved / deregistered (歇業、撤銷、廢止 等). The static shards
+ *   only carry `active` and `suspended`; `closed` comes from the live sources
+ *   the Worker consults (FIA per-record API / GCIS).
+ */
+export type RegistryStatus = 'active' | 'suspended' | 'closed';
+
+/**
+ * What kind of entity holds the number. Optional: absent means unknown
+ * (treat it like `business` unless you have a reason not to).
+ */
+export type EntityKind = 'business' | 'nonprofit' | 'school' | 'agency';
 
 export interface UBNRecord {
   ban: string;
@@ -13,14 +27,24 @@ export interface UBNRecord {
   /** Whether the entity issues uniform invoices (使用統一發票). */
   useInvoice?: boolean;
   /**
-   * `active` or `suspended`, from `BGMOPEN1` / `BGMOPEN1X`.
+   * `active`, `suspended` or `closed`.
    *
-   * Present on shards built by the header-driven pipeline. Shards published
-   * before that omit `status`; a missing value means unknown — do not treat
-   * it as active. The suspension date itself is not on the shard; it is only
-   * in the full dataset (`ubn.ndjson.gz` / `ubn.sqlite`).
+   * Shards built by the header-driven pipeline carry `active` / `suspended`
+   * (from `BGMOPEN1` / `BGMOPEN1X`). Shards published before that omit
+   * `status`; a missing value means unknown — do not treat it as active. The
+   * suspension date itself is not on the shard; it is only in the full dataset
+   * (`ubn.ndjson.gz` / `ubn.sqlite`).
    */
   status?: RegistryStatus;
+  /** Entity kind, when the build could tell. Absent means unknown. */
+  kind?: EntityKind;
+  /**
+   * True when `name` contains Unicode Private Use Area characters (the tax
+   * registry's custom glyphs, 造字). Such a name renders as boxes and should
+   * not be auto-filled as an invoice title. Absent means not flagged — check
+   * with `hasPrivateUse(name)` if you need certainty.
+   */
+  nameHasPrivateUse?: boolean;
 }
 
 export interface LookupOptions {
