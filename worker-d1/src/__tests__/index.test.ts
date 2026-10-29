@@ -148,6 +148,16 @@ describe('vat lookup with D1 loaded', () => {
     expect(res.status).toBe(502);
     expect(put).not.toHaveBeenCalled();
   });
+
+  it('answers 502, uncached, when FIA returns 200 with a non-JSON body', async () => {
+    fia(() => Promise.resolve(new Response('<html>maintenance</html>', { status: 200 })));
+    const res = await lookup(loaded(null));
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ found: null, ban: '22099131', error: 'upstream_unavailable' });
+    expect(res.headers.get('Cache-Control')).toBe('no-store');
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('https://a.example');
+    expect(put).not.toHaveBeenCalled();
+  });
 });
 
 describe('CORS on a cache hit', () => {
