@@ -39,6 +39,7 @@ jobs:
       - name: Fetch previous state
         env:
           GH_TOKEN: ${{ github.token }}
+          ALLOW_SHRINK: ${{ inputs.allow_shrink == true }}
         run: |
           mkdir -p prev
           if gh release download data-latest --pattern 'state.tsv.gz' --dir prev 2>/dev/null; then
@@ -47,15 +48,24 @@ jobs:
           else
             echo "no previous state (first run) — delta will be a full load"
           fi
-          # Previous manifest, for the row-count sanity check. Once data-latest
-          # exists it must carry manifest.json, so a failed download fails the run
-          # instead of silently skipping the check.
-          if gh release view data-latest >/dev/null 2>&1; then
-            if gh release view data-latest --json assets -q '.assets[].name' | grep -qx manifest.json; then
+          # Previous manifest, for the row-count sanity check. Only a confirmed
+          # "release not found" counts as a first run; any other lookup error,
+          # or a data-latest without manifest.json, fails the run so an outage
+          # can't disguise a row drop as a missing baseline.
+          if ASSETS=$(gh release view data-latest --json assets -q '.assets[].name' 2>&1); then
+            if grep -qx manifest.json <<<"$ASSETS"; then
               gh release download data-latest --pattern manifest.json --dir prev
+            elif [ "$ALLOW_SHRINK" = true ]; then
+              echo "::warning::data-latest has no manifest.json; continuing because allow_shrink is set"
             else
-              echo "data-latest has no manifest.json; sanity check will treat this as a first run"
+              echo "::error::data-latest exists but has no manifest.json (re-run with allow_shrink to publish anyway)"
+              exit 1
             fi
+          elif grep -q 'release not found' <<<"$ASSETS"; then
+            echo "no data-latest release (first run) — no baseline for the sanity check"
+          else
+            echo "::error::could not look up data-latest: $ASSETS"
+            exit 1
           fi
 
       - name: Build pipeline

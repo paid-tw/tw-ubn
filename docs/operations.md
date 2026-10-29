@@ -48,7 +48,10 @@ release. It fails the run, before anything is written (dated release,
 - the new manifest has 0 rows, or
 - either manifest is missing `.rows` or is not valid JSON.
 
-A first run (no `data-latest`) passes with a notice. Increases always pass.
+A first run (GitHub confirms `data-latest` does not exist) passes with a notice.
+Any other failure to look up `data-latest`, or a `data-latest` without
+`manifest.json`, fails the run rather than skipping the check. Increases
+always pass.
 
 **Intentional shrink**: Actions → Build dataset → Run workflow → tick
 `allow_shrink`. This skips only the drop check; scheduled runs cannot set it.
