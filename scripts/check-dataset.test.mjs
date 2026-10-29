@@ -35,6 +35,14 @@ test('a drop of exactly the threshold passes', () => {
   assert.equal(check({ current: m(990), previous: m(1000) }).ok, true);
 });
 
+test('a drop exactly at a non-default threshold passes despite float rounding', () => {
+  // (1e6 - 930000) / 1e6 * 100 === 7.000000000000001 in IEEE 754.
+  assert.equal(check({ current: m(930_000), previous: m(1_000_000), maxDropPct: 7 }).ok, true);
+  assert.equal(check({ current: m(929_999), previous: m(1_000_000), maxDropPct: 7 }).ok, false);
+  assert.equal(check({ current: m(999), previous: m(1000), maxDropPct: 0.1 }).ok, true);
+  assert.equal(check({ current: m(998), previous: m(1000), maxDropPct: 0.1 }).ok, false);
+});
+
 test('a drop over the threshold fails', () => {
   const r = check({ current: m(989), previous: m(1000) }); // 1.1%
   assert.equal(r.ok, false);

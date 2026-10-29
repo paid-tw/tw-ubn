@@ -78,7 +78,11 @@ export function check({ current, previous, maxDropPct = 1, allowShrink = false }
   }
   const dropPct = ((prev.rows - cur.rows) / prev.rows) * 100;
   const pct = `${dropPct.toFixed(3)}%`;
-  if (dropPct > maxDropPct) {
+  // Compare cross-multiplied with a tiny relative tolerance: the percentage
+  // itself can round past an exact limit (70000/1e6*100 = 7.000000000000001).
+  const dropped = (prev.rows - cur.rows) * 100;
+  const limit = maxDropPct * prev.rows;
+  if (dropped - limit > Math.max(dropped, limit) * 1e-12) {
     return {
       ok: false,
       level: 'error',
