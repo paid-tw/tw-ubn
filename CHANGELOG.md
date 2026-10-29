@@ -37,6 +37,9 @@ ship when merged to `main`.
   checkout can avoid autofilling them as an invoice title. The name itself is
   unchanged. `manifest.json` reports the count as `namesWithPrivateUse`
   ([#20](https://github.com/paid-tw/tw-ubn/pull/20)).
+- Docs: how to read a lookup response, and why `found: false` is not an invalid
+  UBN — the categories of valid UBNs that have no public source, measured on real
+  checkout data ([#21](https://github.com/paid-tw/tw-ubn/pull/21)).
 - `lookupTitle(ban, { baseUrl, signal?, timeoutMs?, fetchImpl? })` queries a
   deployed Worker's `/v1/vat/:ban` and resolves to `{ found: true, name, status?, … }`,
   `{ found: false }` (the Worker says there is no such registration), or `null`
