@@ -36,6 +36,12 @@ export function rocToISO(roc: string | null | undefined): string | null {
   return `${year}-${mm}-${dd}`;
 }
 
+/**
+ * `suspended` is 停業 (may resume); `closed` is terminated (解散, 廢止, 撤銷 …).
+ * A closed business leaves the tax registry, so for `kind: business` it only
+ * comes from GCIS; dataset rows are `closed` only for withholding units
+ * (deregistered schools / nonprofits).
+ */
 export type RegistryStatus = 'active' | 'suspended' | 'closed';
 
 /** Which register the UBN came from: VAT business or a withholding unit. */
@@ -67,7 +73,11 @@ export interface UBNResult {
   status?: RegistryStatus;
   /** Carried from the shard when present. See `ShardRow.kind`. */
   kind?: RegistryKind;
-  source?: 'dataset' | 'fia-api';
+  source?: 'dataset' | 'fia-api' | 'gcis';
+  /** GCIS only: the raw `Company_Status_Desc`, e.g. 核准設立 / 解散. */
+  companyStatus?: string;
+  /** GCIS only: termination date (ISO) when `status` is `closed`, else null. */
+  closedDate?: string | null;
 }
 
 /** Map a dataset shard row onto the lookup result, including `status` / `kind` when the shard has them. */
@@ -94,5 +104,38 @@ export function normalizeFia(ban: string, j: Record<string, unknown>): UBNResult
     useInvoice: j.isUseInvoice === 'Y',
     setupDate: rocToISO(j.businessSetupDate as string),
     source: 'fia-api',
+  };
+}
+
+/**
+ * Keywords in GCIS `Company_Status_Desc` that mean the company has terminated.
+ * Covers 解散, 合併解散, 核准設立，但已命令解散, 廢止(登記/許可), 撤銷(登記/許可),
+ * 撤回登記, and each "…已清算完結" form. 重整 and the 破產 family are left
+ * unclassified (raw desc only): neither is a termination by itself.
+ */
+const CLOSED_KEYWORDS = ['解散', '廢止', '撤銷', '撤回', '清算完結'];
+
+export function isClosedCompanyStatus(desc: string): boolean {
+  return CLOSED_KEYWORDS.some((k) => desc.includes(k));
+}
+
+/**
+ * Map a GCIS company-registration row onto the unified result shape. A live
+ * company (核准設立) isn't in the tax registry either, so its tax status is
+ * unknown and `status` stays unset; its name is still usable as an invoice
+ * title.
+ */
+export function normalizeGcis(ban: string, j: Record<string, unknown>): UBNResult {
+  const desc = (j.Company_Status_Desc as string) ?? '';
+  const closed = isClosedCompanyStatus(desc);
+  return {
+    found: true,
+    ban,
+    name: (j.Company_Name as string) || undefined,
+    address: (j.Company_Location as string)?.trim() || undefined,
+    source: 'gcis',
+    companyStatus: desc,
+    status: closed ? 'closed' : undefined,
+    closedDate: closed ? rocToISO(j.Revoke_App_Date as string) : null,
   };
 }
