@@ -29,7 +29,7 @@ mod incremental;
 mod transform;
 
 use anyhow::{bail, Context, Result};
-use attribution::{IncludedSource, ACTIVE_URL, SUSPENDED_URL};
+use attribution::{IncludedSource, Sources, ACTIVE_URL, SUSPENDED_URL};
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use rusqlite::{params, Connection};
@@ -246,9 +246,15 @@ fn main() -> Result<()> {
     } else {
         IncludedSource::Loaded(suspended_date.as_deref())
     };
-    let manifest = manifest_json(
-        data_date.as_deref(),
+    let sources = Sources {
+        active: data_date.as_deref(),
         suspended,
+        nonprofit: IncludedSource::Skipped,
+        school: IncludedSource::Skipped,
+        agency: IncludedSource::Skipped,
+    };
+    let manifest = manifest_json(
+        &sources,
         records.len(),
         args.shards,
         &chrono_now(),
@@ -266,21 +272,15 @@ fn main() -> Result<()> {
 
 /// Attribution from this branch, plus the incremental `delta` counts main added.
 fn manifest_json(
-    active_date: Option<&str>,
-    suspended: IncludedSource<'_>,
+    sources: &Sources<'_>,
     rows: usize,
     shards: u32,
     built_at: &str,
     delta: &incremental::Diff,
     had_previous: bool,
 ) -> Result<serde_json::Value> {
-    let mut manifest = serde_json::to_value(attribution::build_manifest(
-        active_date,
-        suspended,
-        rows,
-        shards,
-        built_at,
-    ))?;
+    let mut manifest =
+        serde_json::to_value(attribution::build_manifest(sources, rows, shards, built_at))?;
     manifest["delta"] = serde_json::json!({
         "upserts": delta.upserts.len(),
         "deletes": delta.deletes.len(),

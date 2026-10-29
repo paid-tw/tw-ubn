@@ -1,7 +1,7 @@
 //! Integration-style coverage: real FIA fixture rows go through the same
 //! parse → merge → ndjson/sqlite/shard writers `main` uses.
 
-use super::attribution::IncludedSource;
+use super::attribution::{IncludedSource, Sources};
 use super::incremental::Diff;
 use super::transform::{parse_csv, Status};
 use super::{manifest_json, merge_records, write_ndjson_gz, write_shards, write_sqlite};
@@ -67,15 +67,14 @@ fn manifest_keeps_attribution_and_incremental_delta() -> Result<()> {
         deletes: vec!["10000009".into()],
         unchanged: 3,
     };
-    let manifest = manifest_json(
-        Some("28-OCT-26"),
-        IncludedSource::Loaded(Some("28-OCT-26")),
-        11,
-        32,
-        "2026-10-27T22:00:00Z",
-        &delta,
-        true,
-    )?;
+    let sources = Sources {
+        active: Some("28-OCT-26"),
+        suspended: IncludedSource::Loaded(Some("28-OCT-26")),
+        nonprofit: IncludedSource::Skipped,
+        school: IncludedSource::Skipped,
+        agency: IncludedSource::Skipped,
+    };
+    let manifest = manifest_json(&sources, 11, 32, "2026-10-27T22:00:00Z", &delta, true)?;
     let statement = manifest["attribution"]["statement"]
         .as_str()
         .context("statement")?;
