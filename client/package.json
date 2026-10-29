@@ -1,6 +1,6 @@
 {
   "name": "@paid-tw/ubn",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Taiwan business registry (統一編號) open dataset + a tiny checkout VAT-to-title lookup client",
   "license": "MIT",
   "type": "module",

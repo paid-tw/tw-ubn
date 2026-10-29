@@ -9,29 +9,28 @@ it and what a repository admin still has to set up.
 
 The `build` job declares `environment: dataset`. Environment secrets override
 repository secrets of the same name, and repository secrets stay visible to the
-job, so the workflow keeps working before and after the steps below. Until they
-are done, however, the protection is not in force: GitHub auto-creates the
-environment on first use **with no protection rules**, and the credentials are
-still repository secrets readable from any branch.
+job, so the R2 / D1 credentials belong in the environment only.
 
-As of 2026-10-29 the repository has only a `copilot` environment; `dataset`
-does not exist yet.
+State (verified 2026-10-29):
 
-Admin steps (Settings → Environments):
+- The `dataset` environment exists, with deployment branches restricted to
+  `main` (a custom branch policy). A run from any other branch cannot read its
+  secrets.
+- No R2 / D1 secrets are set anywhere yet (none at repository level either), so
+  the D1 and R2 steps currently log "secrets not set; skipping".
 
-1. Create (or open) the environment `dataset`.
-2. Deployment branches and tags → **Selected branches and tags** → add `main`
-   (or **Protected branches only**, if `main` is protected). This is what stops
-   a workflow run from another branch reaching the secrets.
-3. Add these as environment secrets, with the same names:
+Admin steps (Settings → Environments → `dataset`):
+
+1. Add these as **environment** secrets (not repository secrets):
    `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ACCOUNT_ID`, `R2_BUCKET`,
    `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `D1_DATABASE`.
-4. Run the workflow manually once from `main` and confirm the D1 and R2 steps
-   run (they log "secrets not set; skipping" when they cannot see them).
-5. Delete the repository-level copies of those secrets (Settings → Secrets and
-   variables → Actions → Repository secrets).
-6. Optional: add required reviewers to the environment if every publish should
+2. Run the workflow manually once from `main` and confirm the D1 and R2 steps
+   run instead of logging "secrets not set; skipping".
+3. Optional: add required reviewers to the environment if every publish should
    need a human approval (this also pauses the nightly schedule until approved).
+
+If repository-level copies of these secrets are ever added, delete them: they
+would be readable from any branch.
 
 Whoever rotates the R2 token (yearly) writes the new value to the `dataset`
 environment, not to repository secrets.
