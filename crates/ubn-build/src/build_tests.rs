@@ -263,6 +263,14 @@ fn withholding_rows_reach_ndjson_sqlite_and_shards() -> Result<()> {
     assert_eq!(row["use_invoice"], false);
     assert_eq!(row["address"], "基隆市");
 
+    let conn = Connection::open(dir.0.join("ubn.sqlite"))?;
+    let (kind, status): (String, String) = conn.query_row(
+        "SELECT kind, status FROM ubn WHERE ban = ?1",
+        params!["00532072"],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    assert_eq!((kind.as_str(), status.as_str()), ("school", "closed"));
+
     let bucket = shard_of("03732303", 32);
     let shard: serde_json::Value = serde_json::from_str(&fs::read_to_string(
         dir.0.join("shards").join(format!("{bucket}.json")),

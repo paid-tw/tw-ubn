@@ -173,13 +173,13 @@ fn write_sqlite(records: &[Record], path: &std::path::Path) -> Result<()> {
            ban TEXT, name TEXT, address TEXT, capital TEXT,
            setup_date TEXT, setup_date_iso TEXT, org_type TEXT,
            use_invoice INTEGER, status TEXT, industries TEXT,
-           suspension_date TEXT, suspension_date_iso TEXT);",
+           suspension_date TEXT, suspension_date_iso TEXT, kind TEXT);",
     )?;
     {
         let tx = conn.transaction()?;
         {
             let mut stmt =
-                tx.prepare("INSERT INTO ubn VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)")?;
+                tx.prepare("INSERT INTO ubn VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)")?;
             for r in records {
                 stmt.execute(params![
                     r.ban,
@@ -194,6 +194,7 @@ fn write_sqlite(records: &[Record], path: &std::path::Path) -> Result<()> {
                     serde_json::to_string(&r.industries)?,
                     r.suspension_date,
                     r.suspension_date_iso,
+                    r.kind,
                 ])?;
             }
         }

@@ -82,7 +82,7 @@ fn q(s: &str) -> String {
     format!("'{}'", s.replace('\'', "''"))
 }
 
-const COLUMNS: &str = "ban, name, address, capital, setup_date, setup_date_iso, org_type, use_invoice, status, suspension_date, suspension_date_iso, industries";
+const COLUMNS: &str = "ban, name, address, capital, setup_date, setup_date_iso, org_type, use_invoice, status, suspension_date, suspension_date_iso, industries, kind";
 
 fn sql_text(value: Option<&str>) -> String {
     value.map(q).unwrap_or_else(|| "NULL".into())
@@ -91,7 +91,7 @@ fn sql_text(value: Option<&str>) -> String {
 fn values(r: &Record) -> String {
     let industries = serde_json::to_string(&r.industries).unwrap_or_else(|_| "[]".into());
     format!(
-        "({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})",
+        "({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})",
         q(&r.ban),
         q(&r.name),
         q(&r.address),
@@ -104,6 +104,7 @@ fn values(r: &Record) -> String {
         sql_text(r.suspension_date.as_deref()),
         sql_text(r.suspension_date_iso.as_deref()),
         q(&industries),
+        q(r.kind),
     )
 }
 
@@ -119,7 +120,8 @@ pub fn write_schema_sql(path: &Path) -> Result<()> {
          ban TEXT PRIMARY KEY, name TEXT, address TEXT, capital TEXT,\n  \
          setup_date TEXT, setup_date_iso TEXT, org_type TEXT,\n  \
          use_invoice INTEGER, status TEXT,\n  \
-         suspension_date TEXT, suspension_date_iso TEXT, industries TEXT\n);\n\
+         suspension_date TEXT, suspension_date_iso TEXT, industries TEXT,\n  \
+         kind TEXT\n);\n\
          CREATE INDEX IF NOT EXISTS idx_name ON ubn (name);"
     )?;
     Ok(())
@@ -127,16 +129,21 @@ pub fn write_schema_sql(path: &Path) -> Result<()> {
 
 /// Idempotent column adds for D1 databases created before these columns
 /// existed. `CREATE TABLE IF NOT EXISTS` never alters an existing table, so an
-/// old `ubn` would lack `suspension_date` / `suspension_date_iso` and the first
-/// delta upsert would fail with "table ubn has no column named suspension_date".
+/// old `ubn` would lack `suspension_date` / `suspension_date_iso` / `kind` and
+/// the first delta upsert would fail with "table ubn has no column named …".
 /// Apply each statement on its own, ignoring the "duplicate column name" error a
 /// freshly-created table raises.
+///
+/// Adding `kind` changes every row's JSON, hence its `row_hash`, so the first
+/// build after it upserts every row once — which is also what fills `kind` in
+/// on rows an older build wrote.
 pub fn write_migrate_sql(path: &Path) -> Result<()> {
     let mut w = BufWriter::new(File::create(path)?);
     writeln!(
         w,
         "ALTER TABLE ubn ADD COLUMN suspension_date TEXT;\n\
-         ALTER TABLE ubn ADD COLUMN suspension_date_iso TEXT;"
+         ALTER TABLE ubn ADD COLUMN suspension_date_iso TEXT;\n\
+         ALTER TABLE ubn ADD COLUMN kind TEXT;"
     )?;
     Ok(())
 }
@@ -154,7 +161,7 @@ pub fn write_delta_sql(records: &[Record], d: &Diff, path: &Path) -> Result<()> 
              org_type=excluded.org_type, use_invoice=excluded.use_invoice, \
              status=excluded.status, suspension_date=excluded.suspension_date, \
              suspension_date_iso=excluded.suspension_date_iso, \
-             industries=excluded.industries;",
+             industries=excluded.industries, kind=excluded.kind;",
             values(r),
         )?;
     }
@@ -272,14 +279,59 @@ mod tests {
         let migrate = std::fs::read_to_string(&migrate_path).unwrap();
         assert!(migrate.contains("ALTER TABLE ubn ADD COLUMN suspension_date TEXT;"));
         assert!(migrate.contains("ALTER TABLE ubn ADD COLUMN suspension_date_iso TEXT;"));
+        assert!(migrate.contains("ALTER TABLE ubn ADD COLUMN kind TEXT;"));
+        assert!(schema.contains("kind TEXT"));
         let sql = std::fs::read_to_string(&p).unwrap();
         assert!(sql.contains("'O''Reilly 商行'"));
         assert!(sql.contains("ON CONFLICT(ban) DO UPDATE"));
         assert!(sql.contains("'1150101'"));
         assert!(sql.contains("'2026-01-01'"));
         assert!(sql.contains("suspension_date=excluded.suspension_date"));
+        assert!(sql.contains("kind=excluded.kind"));
+        assert!(sql.contains("'business')"));
         assert!(sql.contains("DELETE FROM ubn WHERE ban IN ('10000009');"));
         assert!(!sql.contains("BEGIN")); // D1 import manages the transaction
+    }
+
+    #[test]
+    fn migrate_then_delta_upgrades_a_pre_kind_table() {
+        // A D1 table as an earlier build created it: no `kind` column.
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE ubn (ban TEXT PRIMARY KEY, name TEXT, address TEXT, capital TEXT,
+               setup_date TEXT, setup_date_iso TEXT, org_type TEXT, use_invoice INTEGER,
+               status TEXT, suspension_date TEXT, suspension_date_iso TEXT, industries TEXT);
+             INSERT INTO ubn (ban, name, status) VALUES ('10000001', 'old', 'active');",
+        )
+        .unwrap();
+        let dir = std::env::temp_dir().join(format!("ubn-migrate-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let migrate_path = dir.join("migrate.sql");
+        write_migrate_sql(&migrate_path).unwrap();
+        // The workflow runs each line on its own and ignores duplicate-column errors.
+        for stmt in std::fs::read_to_string(&migrate_path).unwrap().lines() {
+            let _ = conn.execute_batch(stmt);
+        }
+
+        // The old state hashed a kind-less record; today's differs, so it upserts.
+        let mut r = rec("10000001", "new");
+        r.status = Status::Closed.as_str();
+        r.kind = Kind::Nonprofit.as_str();
+        let prev = HashMap::from([("10000001".to_string(), 0xdead_beef_u64)]);
+        let hashes = vec![row_hash(&r)];
+        let d = diff(&prev, std::slice::from_ref(&r), &hashes);
+        assert_eq!(d.upserts, vec![0]);
+        let delta_path = dir.join("delta.sql");
+        write_delta_sql(&[r], &d, &delta_path).unwrap();
+        conn.execute_batch(&std::fs::read_to_string(&delta_path).unwrap())
+            .unwrap();
+        let (name, status, kind): (String, String, String) = conn
+            .query_row("SELECT name, status, kind FROM ubn", [], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })
+            .unwrap();
+        assert_eq!((name.as_str(), status.as_str()), ("new", "closed"));
+        assert_eq!(kind, "nonprofit");
     }
 
     #[test]
