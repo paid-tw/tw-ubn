@@ -1,4 +1,4 @@
-import { normalizeFia, validateUBN, type UBNResult } from './lib';
+import { normalizeFia, normalizeGcis, validateUBN, type RegistryStatus, type UBNResult } from './lib';
 
 export interface Env {
   /** D1 database holding the `ubn` table (see the pipeline's d1/schema.sql). */
@@ -7,9 +7,17 @@ export interface Env {
   ALLOWED_ORIGINS?: string;
   /** Edge cache TTL in seconds. */
   CACHE_TTL?: string;
+  /**
+   * Edge cache TTL in seconds for a found:false whose GCIS check came back as
+   * an empty body (see `fromGcis`). Default 3600; capped at CACHE_TTL.
+   */
+  NEGATIVE_CACHE_TTL?: string;
 }
 
 const FIA_API = 'https://eip.fia.gov.tw/OAI/api/businessRegistration';
+const GCIS_COMPANY_API = 'https://data.gcis.nat.gov.tw/od/data/api/5F64D864-61CB-4D0D-8AD9-492047CC1EA6';
+/** GCIS only enriches a miss; don't let a slow GCIS hold the response. */
+const GCIS_TIMEOUT_MS = 3000;
 
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -34,6 +42,7 @@ export default {
       const d1 = await fromD1(ban, env);
       let result: UBNResult;
       let cacheable: boolean;
+      let cacheTtl = ttl;
       if (d1.ok && d1.value) {
         result = d1.value;
         cacheable = true;
@@ -49,10 +58,22 @@ export default {
         // the ban may just be in the not-yet-loaded dataset, so don't pin
         // found:false in the cache for a day.
         cacheable = fia.value.found || d1.ok;
+        if (!fia.value.found) {
+          // Not in the tax registry: GCIS may still know the company, closed
+          // (解散/廢止 …, so the caller can say why) or live but unregistered
+          // for tax. GCIS is an enhancement, so its failure never 502s; it
+          // only keeps the FIA-derived found:false out of the cache.
+          const gcis = await fromGcis(ban);
+          if (!gcis.ok) cacheable = false;
+          else if (gcis.value) result = gcis.value;
+          // An empty body is GCIS's "no such company" but also its outage
+          // mode: cache that found:false only briefly.
+          else if (gcis.empty) cacheTtl = Math.min(ttl, Number(env.NEGATIVE_CACHE_TTL ?? '3600'));
+        }
       }
       // Cache CORS-free (the key is shared by all origins); apply the caller's
       // CORS per request so no single origin's allow header enters the cache.
-      const res = json(result, 200, {}, cacheable ? ttl : 0);
+      const res = json(result, 200, {}, cacheable ? cacheTtl : 0);
       if (cacheable) ctx.waitUntil(cache.put(key, res.clone()));
       return withCors(res, cors);
     }
@@ -112,7 +133,7 @@ async function fromD1(ban: string, env: Env): Promise<Lookup<UBNResult | null>> 
       name: row.name as string,
       address: row.address as string,
       useInvoice: !!(row.use_invoice as number),
-      status: row.status as string,
+      status: row.status as RegistryStatus,
       setupDate: (row.setup_date_iso as string) ?? null,
       source: 'dataset',
     },
@@ -139,6 +160,38 @@ async function fromFia(ban: string): Promise<Lookup<UBNResult>> {
     return { ok: true, value: normalizeFia(ban, (await res.json()) as Record<string, unknown>) };
   } catch (e) {
     console.error('fia returned a non-JSON body', e);
+    return { ok: false };
+  }
+}
+
+/**
+ * GCIS (經濟部商業司) company registration, keyed by `Business_Accounting_NO`.
+ * Companies only (not 商號); no CORS, so it can only be queried server-side.
+ *
+ * Verified live 2026-10-29: a hit is HTTP 200 with a one-element JSON array
+ * carrying `Company_Name`, `Company_Status_Desc`, `Company_Location`,
+ * `Revoke_App_Date` (ROC, e.g. "1141124"; "" for a live company) and more.
+ * A ban GCIS has no record of is ALSO HTTP 200 with `Content-Length: 0` (an
+ * empty body, never `[]`), i.e. the same bytes as the outage mode reported in
+ * #7. We can't tell those apart, so an empty body is a miss flagged `empty`
+ * (the handler caches it for NEGATIVE_CACHE_TTL only). A parsed array (`[]`
+ * or a row) is authoritative; an HTTP error, network error, timeout, or a
+ * non-empty body that isn't a JSON array is unavailable (`ok: false`).
+ */
+async function fromGcis(ban: string): Promise<Lookup<UBNResult | null> & { empty?: boolean }> {
+  const url = `${GCIS_COMPANY_API}?$format=json&$filter=Business_Accounting_NO eq ${ban}&$skip=0&$top=1`;
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(GCIS_TIMEOUT_MS) });
+    if (!res.ok) return { ok: false };
+    const body = await res.text();
+    if (body.trim() === '') return { ok: true, value: null, empty: true };
+    const rows: unknown = JSON.parse(body);
+    if (!Array.isArray(rows)) return { ok: false };
+    const row = rows[0] as Record<string, unknown> | undefined;
+    return { ok: true, value: row ? normalizeGcis(ban, row) : null };
+  } catch (e) {
+    // Network error, timeout, or a non-JSON body.
+    console.error('gcis lookup failed', e);
     return { ok: false };
   }
 }

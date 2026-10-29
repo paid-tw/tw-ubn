@@ -7,7 +7,10 @@
   "vars": {
     "ALLOWED_ORIGINS": "*",
     "SHARDS": "8192",
-    "CACHE_TTL": "86400"
+    "CACHE_TTL": "86400",
+    // TTL for a found:false whose GCIS check returned an empty body: GCIS
+    // answers "no such company" and its outage mode identically, so keep it short.
+    "NEGATIVE_CACHE_TTL": "3600"
   },
   "r2_buckets": [
     // Default bucket name so the Deploy to Cloudflare flow can provision it.
