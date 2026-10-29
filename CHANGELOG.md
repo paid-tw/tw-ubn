@@ -34,8 +34,8 @@ ship when merged to `main`.
 
 - First npm release of `@paid-tw/ubn`: `validateUBN` (post-2023 `% 5` checksum),
   `shardOf`, `rocToISO`, `lookupVAT` against the published shards (resolving the
-  versioned `latest.json` pointer), and the `fiaRegistration` / `gcisCompany`
-  source URL helpers.
+  versioned `latest.json` pointer), and `fiaRegistration` / `gcisCompany`, which
+  query the live FIA and GCIS APIs and return the parsed record or `null`.
 
 [Unreleased]: https://github.com/paid-tw/tw-ubn/compare/ubn-v0.1.1...HEAD
 [0.1.1]: https://github.com/paid-tw/tw-ubn/releases/tag/ubn-v0.1.1
