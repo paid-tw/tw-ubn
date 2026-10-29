@@ -209,7 +209,6 @@ describe('vat lookup: dataset, FIA fallback, and what gets cached', () => {
       ['an HTTP error', () => Promise.resolve(new Response('oops', { status: 500 }))],
       ['a network error', () => Promise.reject(new Error('network error'))],
       ['a timeout', () => Promise.reject(new DOMException('timed out', 'TimeoutError'))],
-      ['HTTP 200 with an empty body', () => Promise.resolve(new Response('', { status: 200 }))],
       ['HTTP 200 with a non-JSON body', () => Promise.resolve(new Response('<html>busy</html>', { status: 200 }))],
       ['HTTP 200 with a non-array JSON body', () => Promise.resolve(Response.json({ error: 'x' }))],
     ];
@@ -223,6 +222,35 @@ describe('vat lookup: dataset, FIA fallback, and what gets cached', () => {
         expect(put).not.toHaveBeenCalled();
       });
     }
+
+    // GCIS's live "no such company" (HTTP 200, Content-Length: 0), which is
+    // also its reported outage mode: cached, but only for NEGATIVE_CACHE_TTL.
+    const EMPTY_200 = () => Promise.resolve(new Response('', { status: 200 }));
+
+    it('caches found:false briefly (default 3600 s) when GCIS returns an empty body', async () => {
+      fia(FIA_404, EMPTY_200);
+      const res = await lookup(published([]));
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ found: false, ban: '22099131' });
+      expect(res.headers.get('Cache-Control')).toBe('public, max-age=3600');
+      expect(put).toHaveBeenCalledTimes(1);
+    });
+
+    it('honours NEGATIVE_CACHE_TTL, capped at CACHE_TTL', async () => {
+      fia(FIA_404, EMPTY_200);
+      const bkt = published([]);
+      const get = (vars: Partial<Env>) =>
+        worker.fetch(new Request('https://w/v1/vat/22099131'), { ...env, SHARDS: '256', UBN_BUCKET: bkt, ...vars }, ctx);
+      expect((await get({ NEGATIVE_CACHE_TTL: '600' })).headers.get('Cache-Control')).toBe('public, max-age=600');
+      expect((await get({ CACHE_TTL: '300' })).headers.get('Cache-Control')).toBe('public, max-age=300');
+    });
+
+    it('does not cache an empty GCIS body while R2 errored', async () => {
+      fia(FIA_404, EMPTY_200);
+      const res = await lookup(failing);
+      expect(await res.json()).toEqual({ found: false, ban: '22099131' });
+      expect(put).not.toHaveBeenCalled();
+    });
 
     it('does not cache a GCIS hit while R2 errored (the dataset might carry the ban)', async () => {
       fia(FIA_404, () => Promise.resolve(Response.json([dissolved])));

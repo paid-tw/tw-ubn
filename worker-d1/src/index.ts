@@ -7,6 +7,11 @@ export interface Env {
   ALLOWED_ORIGINS?: string;
   /** Edge cache TTL in seconds. */
   CACHE_TTL?: string;
+  /**
+   * Edge cache TTL in seconds for a found:false whose GCIS check came back as
+   * an empty body (see `fromGcis`). Default 3600; capped at CACHE_TTL.
+   */
+  NEGATIVE_CACHE_TTL?: string;
 }
 
 const FIA_API = 'https://eip.fia.gov.tw/OAI/api/businessRegistration';
@@ -37,6 +42,7 @@ export default {
       const d1 = await fromD1(ban, env);
       let result: UBNResult;
       let cacheable: boolean;
+      let cacheTtl = ttl;
       if (d1.ok && d1.value) {
         result = d1.value;
         cacheable = true;
@@ -60,11 +66,14 @@ export default {
           const gcis = await fromGcis(ban);
           if (!gcis.ok) cacheable = false;
           else if (gcis.value) result = gcis.value;
+          // An empty body is GCIS's "no such company" but also its outage
+          // mode: cache that found:false only briefly.
+          else if (gcis.empty) cacheTtl = Math.min(ttl, Number(env.NEGATIVE_CACHE_TTL ?? '3600'));
         }
       }
       // Cache CORS-free (the key is shared by all origins); apply the caller's
       // CORS per request so no single origin's allow header enters the cache.
-      const res = json(result, 200, {}, cacheable ? ttl : 0);
+      const res = json(result, 200, {}, cacheable ? cacheTtl : 0);
       if (cacheable) ctx.waitUntil(cache.put(key, res.clone()));
       return withCors(res, cors);
     }
@@ -164,21 +173,24 @@ async function fromFia(ban: string): Promise<Lookup<UBNResult>> {
  * `Revoke_App_Date` (ROC, e.g. "1141124"; "" for a live company) and more.
  * A ban GCIS has no record of is ALSO HTTP 200 with `Content-Length: 0` (an
  * empty body, never `[]`), i.e. the same bytes as the outage mode reported in
- * #7. We can't tell those apart, so an empty or non-JSON body counts as
- * unavailable (`ok: false`): the answer is still the FIA-derived found:false,
- * just not cached. Only a parsed array (`[]` or a row) is authoritative.
+ * #7. We can't tell those apart, so an empty body is a miss flagged `empty`
+ * (the handler caches it for NEGATIVE_CACHE_TTL only). A parsed array (`[]`
+ * or a row) is authoritative; an HTTP error, network error, timeout, or a
+ * non-empty body that isn't a JSON array is unavailable (`ok: false`).
  */
-async function fromGcis(ban: string): Promise<Lookup<UBNResult | null>> {
+async function fromGcis(ban: string): Promise<Lookup<UBNResult | null> & { empty?: boolean }> {
   const url = `${GCIS_COMPANY_API}?$format=json&$filter=Business_Accounting_NO eq ${ban}&$skip=0&$top=1`;
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(GCIS_TIMEOUT_MS) });
     if (!res.ok) return { ok: false };
-    const rows: unknown = JSON.parse(await res.text());
+    const body = await res.text();
+    if (body.trim() === '') return { ok: true, value: null, empty: true };
+    const rows: unknown = JSON.parse(body);
     if (!Array.isArray(rows)) return { ok: false };
     const row = rows[0] as Record<string, unknown> | undefined;
     return { ok: true, value: row ? normalizeGcis(ban, row) : null };
   } catch (e) {
-    // Network error, timeout, or an empty / non-JSON body.
+    // Network error, timeout, or a non-JSON body.
     console.error('gcis lookup failed', e);
     return { ok: false };
   }
