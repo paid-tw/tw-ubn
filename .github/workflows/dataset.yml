@@ -17,6 +17,10 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # R2 / D1 write credentials live in this environment, restricted to the
+    # default branch (see docs/operations.md). Until it is configured, repo-level
+    # secrets of the same names still resolve.
+    environment: dataset
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       # Pinned to a master-branch commit; the toolchain must be explicit (see ci.yml).
