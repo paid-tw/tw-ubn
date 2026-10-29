@@ -70,6 +70,28 @@ if (validateUBN(ban)) {
 }
 ```
 
+若你部署了下方的 Worker，改用 `lookupTitle` 打 `/v1/vat/:ban`。它**從不拋錯**（檢查碼錯也只回
+`null`，這點和 `lookupVAT` 不同），三種結果各有明確語意：
+
+```ts
+import { lookupTitle, isSameTitle } from '@paid-tw/ubn';
+
+const r = await lookupTitle(ban, { baseUrl: 'https://ubn.example.com', timeoutMs: 1500 });
+if (r === null) {
+  // 沒有答案：檢查碼錯、逾時、網路錯誤、非 2xx（含上游故障的 502）、
+  // 或名稱不能用（空白、含私用區造字）。不顯示任何提示，讓買家自己填。
+} else if (!r.found) {
+  // 沒有任何來源有這個統編。不等於統編錯誤（見下方「查詢結果怎麼解讀」）：
+  // 最多提示買家再確認一次，讓買家自己填抬頭，不要擋下結帳。
+} else {
+  fillTitle(r.name);                     // r.status 可能是 'suspended' / 'closed'，由你決定如何處理
+}
+
+// 比對買家填的抬頭與登記名稱：忽略全形半形（NFKC）、臺／台、空白與英文大小寫；
+// 不會省略或改寫「股份有限公司」等組織型態。
+isSameTitle('臺灣ＡＢＣ　股份有限公司', '台灣abc股份有限公司'); // true
+```
+
 `validateUBN` 的檢查碼已對全部約 170 萬筆營業中統編驗證（100% 通過），採用 **2023 年
 後的規則**，而非許多網路片段裡過時的 `% 10` 版本。
 

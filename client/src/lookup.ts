@@ -1,8 +1,24 @@
 import { validateUBN } from './checksum.js';
 import { shardOf, DEFAULT_SHARDS } from './shard.js';
 
-/** Registry status written onto shards. Older shards omit the field. */
-export type RegistryStatus = 'active' | 'suspended';
+/**
+ * Registry status.
+ *
+ * - `active` — operating (營業中).
+ * - `suspended` — temporarily suspended (停業), from `BGMOPEN1X`.
+ * - `closed` — dissolved / deregistered (歇業、撤銷、廢止 等). On shards this
+ *   marks deregistered schools and nonprofits (withholding units); the Worker
+ *   also returns it for terminated companies it finds in GCIS.
+ */
+export type RegistryStatus = 'active' | 'suspended' | 'closed';
+
+/**
+ * Which register the UBN came from: a VAT-registered `business`, or a
+ * withholding unit — `nonprofit`, `school` or `agency` (these have
+ * `useInvoice: false`). Optional on records: absent means unknown (shards built
+ * before the withholding-unit sources).
+ */
+export type RegistryKind = 'business' | 'nonprofit' | 'school' | 'agency';
 
 export interface UBNRecord {
   ban: string;
@@ -13,14 +29,26 @@ export interface UBNRecord {
   /** Whether the entity issues uniform invoices (使用統一發票). */
   useInvoice?: boolean;
   /**
-   * `active` or `suspended`, from `BGMOPEN1` / `BGMOPEN1X`.
+   * `active`, `suspended` or `closed`.
    *
-   * Present on shards built by the header-driven pipeline. Shards published
-   * before that omit `status`; a missing value means unknown — do not treat
-   * it as active. The suspension date itself is not on the shard; it is only
-   * in the full dataset (`ubn.ndjson.gz` / `ubn.sqlite`).
+   * Shards built by the header-driven pipeline carry `active` / `suspended`
+   * (from `BGMOPEN1` / `BGMOPEN1X`), and `closed` for deregistered withholding
+   * units. Shards published before that omit
+   * `status`; a missing value means unknown — do not treat it as active. The
+   * suspension date itself is not on the shard; it is only in the full dataset
+   * (`ubn.ndjson.gz` / `ubn.sqlite`).
    */
   status?: RegistryStatus;
+  /** Entity kind, when the build could tell. Absent means unknown. */
+  kind?: RegistryKind;
+  /**
+   * Present (and then always `true`) when `name` contains Unicode Private Use
+   * Area characters (the tax registry's custom glyphs, 造字). Such a name
+   * renders as boxes and should not be auto-filled as an invoice title. Absent
+   * means not flagged — older shards never set it, so check with
+   * `hasPrivateUse(name)` if you need certainty.
+   */
+  nameHasPrivateUse?: true;
 }
 
 export interface LookupOptions {

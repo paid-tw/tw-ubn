@@ -80,6 +80,31 @@ if (validateUBN(ban)) {
 }
 ```
 
+If you deploy the Worker below, use `lookupTitle` against its `/v1/vat/:ban`
+instead. It **never throws** (an invalid checksum resolves to `null`, unlike
+`lookupVAT`), and each of its three results means one thing:
+
+```ts
+import { lookupTitle, isSameTitle } from '@paid-tw/ubn';
+
+const r = await lookupTitle(ban, { baseUrl: 'https://ubn.example.com', timeoutMs: 1500 });
+if (r === null) {
+  // no answer: bad checksum, timeout, network error, non-2xx (incl. the 502
+  // for an upstream outage), or an unusable name (empty, PUA glyphs).
+  // Show nothing; let the buyer type the title.
+} else if (!r.found) {
+  // no source has this UBN. Not the same as invalid (see "Reading a lookup"
+  // below): at most a "please double-check" hint; never block checkout.
+} else {
+  fillTitle(r.name);                     // r.status may be 'suspended' / 'closed'; your call
+}
+
+// compare a buyer-typed title with the registered name: ignores full/half
+// width (NFKC), 臺/台, whitespace and Latin case; never rewrites legal forms
+// such as 股份有限公司.
+isSameTitle('臺灣ＡＢＣ　股份有限公司', '台灣abc股份有限公司'); // true
+```
+
 The `validateUBN` checksum is verified against all ~1.7M active UBNs (100%); it
 uses the post-2023 rule, not the stale `% 10` one found in many snippets.
 

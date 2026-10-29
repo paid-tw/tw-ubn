@@ -40,6 +40,23 @@ ship when merged to `main`.
 - Docs: how to read a lookup response, and why `found: false` is not an invalid
   UBN — the categories of valid UBNs that have no public source, measured on real
   checkout data ([#21](https://github.com/paid-tw/tw-ubn/pull/21)).
+- `lookupTitle(ban, { baseUrl, signal?, timeoutMs?, fetchImpl? })` queries a
+  deployed Worker's `/v1/vat/:ban` and resolves to `{ found: true, name, status?, … }`,
+  `{ found: false }` (no source has a record — a hint, not an invalid UBN), or `null`
+  (no answer: bad checksum, timeout, abort, network error, any non-2xx including
+  `502 upstream_unavailable`, a malformed body, or a name that is empty or has
+  Private Use Area glyphs). Unlike `lookupVAT`, it never throws
+  ([#14](https://github.com/paid-tw/tw-ubn/pull/14)).
+- `isSameTitle(a, b)` compares two invoice titles while ignoring full-/half-width
+  forms (NFKC), 臺/台, whitespace and Latin case. It never rewrites legal forms
+  such as 股份有限公司 ([#14](https://github.com/paid-tw/tw-ubn/pull/14)).
+- `hasPrivateUse(s)` reports whether a string contains Unicode Private Use Area
+  characters (the registry's custom glyphs), which should not be auto-filled as a
+  title ([#14](https://github.com/paid-tw/tw-ubn/pull/14)).
+- Types: `RegistryStatus` adds `'closed'`, a new `RegistryKind`
+  (`'business' | 'nonprofit' | 'school' | 'agency'`), and `UBNRecord` gains
+  optional `kind` and `nameHasPrivateUse` (`true` when present)
+  ([#14](https://github.com/paid-tw/tw-ubn/pull/14)).
 
 ### Fixed
 
