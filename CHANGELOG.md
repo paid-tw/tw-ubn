@@ -11,6 +11,8 @@ ship when merged to `main`.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-29
+
 ### Added
 
 - `worker`, `worker-d1`: when a ban is in neither the dataset nor FIA, look it up
@@ -58,6 +60,11 @@ ship when merged to `main`.
   optional `kind` and `nameHasPrivateUse` (`true` when present)
   ([#14](https://github.com/paid-tw/tw-ubn/pull/14)).
 
+### Changed
+
+- Workflows: bump `actions/checkout` to 7.0.1, `actions/setup-node` to 7.1.0 and
+  `pnpm/action-setup` to 6.1.0 ([#19](https://github.com/paid-tw/tw-ubn/pull/19)).
+
 ### Fixed
 
 - `worker-d1`: fall back to the FIA API when D1 has no `ubn` table yet, instead of
@@ -102,6 +109,7 @@ ship when merged to `main`.
   versioned `latest.json` pointer), and `fiaRegistration` / `gcisCompany`, which
   query the live FIA and GCIS APIs and return the parsed record or `null`.
 
-[Unreleased]: https://github.com/paid-tw/tw-ubn/compare/ubn-v0.1.1...HEAD
+[Unreleased]: https://github.com/paid-tw/tw-ubn/compare/ubn-v0.2.0...HEAD
+[0.2.0]: https://github.com/paid-tw/tw-ubn/compare/ubn-v0.1.1...ubn-v0.2.0
 [0.1.1]: https://github.com/paid-tw/tw-ubn/releases/tag/ubn-v0.1.1
 [0.1.0]: https://www.npmjs.com/package/@paid-tw/ubn/v/0.1.0
