@@ -116,9 +116,10 @@ async function fromD1(ban: string, env: Env): Promise<Lookup<UBNResult | null>> 
   let row: Record<string, unknown> | null;
   try {
     // SELECT * rather than naming columns: a column added by a newer build
-    // (`kind` …) may not exist yet if this Worker is deployed before the
-    // dataset workflow has run migrate.sql, and naming it would fail every
-    // lookup over to FIA. Optional columns are mapped only when present.
+    // (`kind`, `name_has_private_use` …) may not exist yet if this Worker is
+    // deployed before the dataset workflow has run migrate.sql, and naming it
+    // would fail every lookup over to FIA. Optional columns are mapped only
+    // when present.
     row = await env.UBN_DB.prepare('SELECT * FROM ubn WHERE ban = ?')
       .bind(ban)
       .first<Record<string, unknown>>();
@@ -138,6 +139,8 @@ async function fromD1(ban: string, env: Env): Promise<Lookup<UBNResult | null>> 
       status: row.status as RegistryStatus,
       // Absent (pre-migrate table) or NULL (row loaded before `kind`): unknown.
       kind: (row.kind as RegistryKind | null | undefined) ?? undefined,
+      // Absent or NULL (row loaded before the column existed): same as false.
+      ...(row.name_has_private_use ? { nameHasPrivateUse: true as const } : {}),
       setupDate: (row.setup_date_iso as string) ?? null,
       source: 'dataset',
     },

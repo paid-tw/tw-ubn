@@ -30,7 +30,7 @@
 //! the county or city (`機關所在縣市`) for nonprofits and schools — the only
 //! location these files give — and empty for agencies.
 
-use crate::transform::{cell, index_columns, Kind, Parsed, Record, Status};
+use crate::transform::{cell, has_private_use, index_columns, Kind, Parsed, Record, Status};
 use anyhow::Result;
 use std::collections::HashSet;
 
@@ -120,9 +120,11 @@ pub fn parse_withholding_csv<R: std::io::Read>(reader: R, source: Source) -> Res
             continue;
         }
         let status = reason_col.map_or(Status::Active, |i| status_of_reason(&cell(&r, i)));
+        let name = cell(&r, name_col);
         records.push(Record {
             ban,
-            name: cell(&r, name_col),
+            name_has_private_use: has_private_use(&name),
+            name,
             address: city_col.map(|i| cell(&r, i)).unwrap_or_default(),
             capital: String::new(),
             setup_date: String::new(),
@@ -169,7 +171,7 @@ mod tests {
     fn nonprofit_fixture_skips_sentinel_and_maps_codes() {
         let p = parse_withholding_csv(NONPROFIT_FIXTURE.as_bytes(), Source::Nonprofit).unwrap();
         assert_eq!(p.data_date.as_deref(), Some("1151030"));
-        assert_eq!(p.records.len(), 7);
+        assert_eq!(p.records.len(), 8);
         assert!(p.records.iter().all(|r| r.kind == "nonprofit"));
         assert!(p.records.iter().all(|r| !r.use_invoice));
         assert!(p.records.iter().all(|r| r.industries.is_empty()));
@@ -188,6 +190,15 @@ mod tests {
         assert_eq!(find(&p, "00831856").status, "closed"); // 18
         assert_eq!(find(&p, "26088212").status, "suspended"); // 12
         assert_eq!(find(&p, "61173632").status, "active"); // 01
+
+        // 財團法人大三U+F961C慈惠寺: a plane-15 private-use character.
+        let pua = find(&p, "02409186");
+        assert!(pua.name.contains('\u{F961C}'));
+        assert!(pua.name_has_private_use);
+        assert_eq!(
+            p.records.iter().filter(|r| r.name_has_private_use).count(),
+            1
+        );
     }
 
     #[test]

@@ -75,7 +75,8 @@ fn manifest_keeps_attribution_and_incremental_delta() -> Result<()> {
         school: IncludedSource::Skipped,
         agency: IncludedSource::Skipped,
     };
-    let manifest = manifest_json(&sources, 11, 32, "2026-10-27T22:00:00Z", &delta, true)?;
+    let manifest = manifest_json(&sources, 11, 2, 32, "2026-10-27T22:00:00Z", &delta, true)?;
+    assert_eq!(manifest["namesWithPrivateUse"], 2);
     let statement = manifest["attribution"]["statement"]
         .as_str()
         .context("statement")?;
@@ -244,8 +245,8 @@ fn merge_precedence_business_then_school_nonprofit_agency() -> Result<()> {
     sorted.sort();
     sorted.dedup();
     assert_eq!(bans, sorted);
-    // 11 business + 7 nonprofit + 5 school + 5 agency, minus the 3 overlaps.
-    assert_eq!(merged.len(), 25);
+    // 11 business + 8 nonprofit + 5 school + 5 agency, minus the 3 overlaps.
+    assert_eq!(merged.len(), 26);
     Ok(())
 }
 
@@ -285,5 +286,48 @@ fn withholding_rows_reach_ndjson_sqlite_and_shards() -> Result<()> {
     assert_eq!(shard_row["name"], "財政部");
     assert_eq!(shard_row["useInvoice"], false);
     assert_eq!(shard_row["status"], "active");
+    assert!(shard_row.get("nameHasPrivateUse").is_none());
+    Ok(())
+}
+
+#[test]
+fn private_use_flag_reaches_ndjson_sqlite_and_shards() -> Result<()> {
+    let dir = TempDir::new();
+    let records = merge_all()?;
+    write_shards(&records, &dir.0, 32)?;
+    write_ndjson_gz(&records, &dir.0.join("ubn.ndjson.gz"))?;
+    write_sqlite(&records, &dir.0.join("ubn.sqlite"))?;
+    let ban = "02409186"; // 財團法人大三U+F961C慈惠寺
+
+    let row = ndjson_by_ban(&dir.0.join("ubn.ndjson.gz"), ban)?;
+    assert_eq!(row["name_has_private_use"], true);
+    let plain = ndjson_by_ban(&dir.0.join("ubn.ndjson.gz"), "47588972")?;
+    assert!(plain.get("name_has_private_use").is_none());
+
+    let conn = Connection::open(dir.0.join("ubn.sqlite"))?;
+    let flagged: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM ubn WHERE name_has_private_use = 1",
+        [],
+        |r| r.get(0),
+    )?;
+    assert_eq!(flagged, 1);
+    let unflagged: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM ubn WHERE name_has_private_use = 0",
+        [],
+        |r| r.get(0),
+    )?;
+    assert_eq!(unflagged as usize, records.len() - 1);
+
+    let bucket = shard_of(ban, 32);
+    let shard: serde_json::Value = serde_json::from_str(&fs::read_to_string(
+        dir.0.join("shards").join(format!("{bucket}.json")),
+    )?)?;
+    let shard_row = shard
+        .as_array()
+        .context("shard is an array")?
+        .iter()
+        .find(|r| r["ban"] == ban)
+        .context("shard contains the flagged row")?;
+    assert_eq!(shard_row["nameHasPrivateUse"], true);
     Ok(())
 }

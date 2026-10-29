@@ -79,6 +79,10 @@ pub struct Record {
     pub status: &'static str,
     /// `Kind::as_str()`: which register the row came from.
     pub kind: &'static str,
+    /// `name` contains a Private Use Area character (see `has_private_use`).
+    /// Serialized only when true, so rows without one hash as before.
+    #[serde(skip_serializing_if = "is_false")]
+    pub name_has_private_use: bool,
     /// ROC date from `停業日期`. Null when that column is absent (active
     /// file) or the cell is blank.
     pub suspension_date: Option<String>,
@@ -95,6 +99,9 @@ pub struct Record {
 ///
 /// `kind` was added with the withholding-unit sources. Shards built before
 /// that omit it; a missing `kind` means unknown.
+///
+/// `nameHasPrivateUse` is present (and `true`) only when the name holds a
+/// Private Use Area character; absent means false.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct ShardRecord {
     pub ban: String,
@@ -104,6 +111,8 @@ pub struct ShardRecord {
     pub use_invoice: bool,
     pub status: &'static str,
     pub kind: &'static str,
+    #[serde(rename = "nameHasPrivateUse", skip_serializing_if = "is_false")]
+    pub name_has_private_use: bool,
 }
 
 impl Record {
@@ -115,8 +124,25 @@ impl Record {
             use_invoice: self.use_invoice,
             status: self.status,
             kind: self.kind,
+            name_has_private_use: self.name_has_private_use,
         }
     }
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
+/// True when `s` holds a Unicode Private Use Area code point: the BMP area
+/// U+E000–U+F8FF or the supplementary planes 15 and 16 (U+F0000–U+FFFFD,
+/// U+100000–U+10FFFD). The tax registry uses these for characters its system
+/// defined locally (造字); they render as boxes in ordinary fonts and have no
+/// verified mapping to standard Unicode, so they are flagged, not converted.
+pub fn has_private_use(s: &str) -> bool {
+    s.chars().any(|c| {
+        matches!(c,
+            '\u{E000}'..='\u{F8FF}' | '\u{F0000}'..='\u{FFFFD}' | '\u{100000}'..='\u{10FFFD}')
+    })
 }
 
 #[derive(Debug)]
@@ -312,11 +338,13 @@ pub fn parse_csv<R: std::io::Read>(reader: R, status: Status) -> Result<Parsed> 
             .suspension_date
             .map(|i| cell(&r, i))
             .filter(|s| !s.is_empty());
+        let name = cell(&r, cols.name);
         records.push(Record {
             setup_date_iso: roc_to_iso(&setup_date),
             suspension_date_iso: suspension_date.as_deref().and_then(roc_to_iso),
             ban,
-            name: cell(&r, cols.name),
+            name_has_private_use: has_private_use(&name),
+            name,
             address: cell(&r, cols.address),
             capital: cell(&r, cols.capital),
             setup_date,
@@ -367,6 +395,64 @@ mod tests {
             w.write_record(flip(row)).unwrap();
         }
         String::from_utf8(w.into_inner().unwrap()).unwrap()
+    }
+
+    #[test]
+    fn private_use_detection_boundaries() {
+        // BMP Private Use Area: U+E000..=U+F8FF, bounded by surrogates and
+        // the CJK Compatibility Ideographs.
+        for c in ['\u{E000}', '\u{F585}', '\u{F8FF}'] {
+            assert!(has_private_use(&format!("名稱{c}")), "U+{:X}", c as u32);
+        }
+        for c in ['\u{D7FF}', '\u{F900}', '\u{FFFD}'] {
+            assert!(!has_private_use(&format!("名稱{c}")), "U+{:X}", c as u32);
+        }
+        // U+DFFF is a surrogate and cannot occur in a Rust string; its
+        // neighbour across the boundary is U+E000, covered above.
+        assert!(char::from_u32(0xDFFF).is_none());
+
+        // Supplementary Private Use Area-A / -B.
+        for c in [
+            '\u{F0000}',
+            '\u{FA3FE}',
+            '\u{FFFFD}',
+            '\u{100000}',
+            '\u{10FFFD}',
+        ] {
+            assert!(has_private_use(&c.to_string()), "U+{:X}", c as u32);
+        }
+        // Noncharacters at the end of planes 15/16 and ordinary astral CJK.
+        for c in [
+            '\u{EFFFF}',
+            '\u{FFFFE}',
+            '\u{FFFFF}',
+            '\u{10FFFE}',
+            '\u{20000}',
+        ] {
+            assert!(!has_private_use(&c.to_string()), "U+{:X}", c as u32);
+        }
+        assert!(!has_private_use("台積電"));
+        assert!(!has_private_use(""));
+    }
+
+    #[test]
+    fn private_use_flag_is_serialized_only_when_true() {
+        let csv = SAMPLE.replace("\"小吃店\"", "\"小吃店\u{F585}\"");
+        let p = parse_csv(csv.as_bytes(), Status::Active).unwrap();
+        let (plain, flagged) = (&p.records[0], &p.records[1]);
+        assert!(!plain.name_has_private_use);
+        assert!(flagged.name_has_private_use);
+
+        let plain_shard = serde_json::to_value(plain.to_shard()).unwrap();
+        assert!(plain_shard.get("nameHasPrivateUse").is_none());
+        let flagged_shard = serde_json::to_value(flagged.to_shard()).unwrap();
+        assert_eq!(flagged_shard["nameHasPrivateUse"], true);
+        assert_eq!(flagged_shard["name"], "小吃店\u{F585}"); // name kept as is
+
+        let plain_row = serde_json::to_value(plain).unwrap();
+        assert!(plain_row.get("name_has_private_use").is_none());
+        let flagged_row = serde_json::to_value(flagged).unwrap();
+        assert_eq!(flagged_row["name_has_private_use"], true);
     }
 
     #[test]

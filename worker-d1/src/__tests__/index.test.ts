@@ -368,5 +368,41 @@ describe('D1 row mapping', () => {
     expect(body).toMatchObject({ found: true, ban: '22099131', status: 'active', source: 'dataset' });
     expect('kind' in body).toBe(false);
     expect(fia).not.toHaveBeenCalled();
+    expect('nameHasPrivateUse' in body).toBe(false);
+  });
+
+  it('passes the private-use flag through', async () => {
+    const { body } = await lookup({
+      ban: '02409186',
+      name: '財團法人大三\u{F961C}慈惠寺',
+      address: '臺中市',
+      use_invoice: 0,
+      status: 'active',
+      kind: 'nonprofit',
+      name_has_private_use: 1,
+      setup_date_iso: null,
+    });
+    expect(body).toMatchObject({ found: true, kind: 'nonprofit', nameHasPrivateUse: true, source: 'dataset' });
+  });
+
+  it('omits the flag for unflagged and NULL rows', async () => {
+    for (const flag of [0, null]) {
+      const { body } = await lookup({ ban: '22099131', name: '台積電', use_invoice: 1, status: 'active', kind: null, name_has_private_use: flag });
+      expect('nameHasPrivateUse' in body).toBe(false);
+      expect('kind' in body).toBe(false);
+    }
+  });
+
+  it('still answers from D1 when the table has kind but predates name_has_private_use', async () => {
+    const { body, fia } = await lookup({
+      ban: '00532072',
+      name: '臺北市私立陽光森林麗湖幼兒園',
+      use_invoice: 0,
+      status: 'closed',
+      kind: 'school',
+    });
+    expect(body).toMatchObject({ found: true, kind: 'school', source: 'dataset' });
+    expect('nameHasPrivateUse' in body).toBe(false);
+    expect(fia).not.toHaveBeenCalled();
   });
 });

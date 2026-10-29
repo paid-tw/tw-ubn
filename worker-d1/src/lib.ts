@@ -46,6 +46,11 @@ export interface UBNResult {
   status?: RegistryStatus;
   /** Unset on rows loaded before `kind` existed. */
   kind?: RegistryKind;
+  /**
+   * Present (and `true`) only when `name` holds a Unicode Private Use Area
+   * character (the registry's 造字). Absent means false.
+   */
+  nameHasPrivateUse?: true;
   setupDate?: string | null;
   source?: 'dataset' | 'fia-api' | 'gcis';
   /** GCIS only: the raw `Company_Status_Desc`, e.g. 核准設立 / 解散. */

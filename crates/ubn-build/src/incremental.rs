@@ -82,7 +82,7 @@ fn q(s: &str) -> String {
     format!("'{}'", s.replace('\'', "''"))
 }
 
-const COLUMNS: &str = "ban, name, address, capital, setup_date, setup_date_iso, org_type, use_invoice, status, suspension_date, suspension_date_iso, industries, kind";
+const COLUMNS: &str = "ban, name, address, capital, setup_date, setup_date_iso, org_type, use_invoice, status, suspension_date, suspension_date_iso, industries, kind, name_has_private_use";
 
 fn sql_text(value: Option<&str>) -> String {
     value.map(q).unwrap_or_else(|| "NULL".into())
@@ -91,7 +91,7 @@ fn sql_text(value: Option<&str>) -> String {
 fn values(r: &Record) -> String {
     let industries = serde_json::to_string(&r.industries).unwrap_or_else(|_| "[]".into());
     format!(
-        "({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})",
+        "({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})",
         q(&r.ban),
         q(&r.name),
         q(&r.address),
@@ -105,6 +105,7 @@ fn values(r: &Record) -> String {
         sql_text(r.suspension_date_iso.as_deref()),
         q(&industries),
         q(r.kind),
+        if r.name_has_private_use { 1 } else { 0 },
     )
 }
 
@@ -121,7 +122,7 @@ pub fn write_schema_sql(path: &Path) -> Result<()> {
          setup_date TEXT, setup_date_iso TEXT, org_type TEXT,\n  \
          use_invoice INTEGER, status TEXT,\n  \
          suspension_date TEXT, suspension_date_iso TEXT, industries TEXT,\n  \
-         kind TEXT\n);\n\
+         kind TEXT, name_has_private_use INTEGER\n);\n\
          CREATE INDEX IF NOT EXISTS idx_name ON ubn (name);"
     )?;
     Ok(())
@@ -136,14 +137,18 @@ pub fn write_schema_sql(path: &Path) -> Result<()> {
 ///
 /// Adding `kind` changes every row's JSON, hence its `row_hash`, so the first
 /// build after it upserts every row once — which is also what fills `kind` in
-/// on rows an older build wrote.
+/// on rows an older build wrote. `name_has_private_use` is different: it is
+/// serialized only when true, so only flagged rows change hash and get
+/// upserted; every other pre-existing row keeps NULL there, which readers
+/// treat as false.
 pub fn write_migrate_sql(path: &Path) -> Result<()> {
     let mut w = BufWriter::new(File::create(path)?);
     writeln!(
         w,
         "ALTER TABLE ubn ADD COLUMN suspension_date TEXT;\n\
          ALTER TABLE ubn ADD COLUMN suspension_date_iso TEXT;\n\
-         ALTER TABLE ubn ADD COLUMN kind TEXT;"
+         ALTER TABLE ubn ADD COLUMN kind TEXT;\n\
+         ALTER TABLE ubn ADD COLUMN name_has_private_use INTEGER;"
     )?;
     Ok(())
 }
@@ -161,7 +166,8 @@ pub fn write_delta_sql(records: &[Record], d: &Diff, path: &Path) -> Result<()> 
              org_type=excluded.org_type, use_invoice=excluded.use_invoice, \
              status=excluded.status, suspension_date=excluded.suspension_date, \
              suspension_date_iso=excluded.suspension_date_iso, \
-             industries=excluded.industries, kind=excluded.kind;",
+             industries=excluded.industries, kind=excluded.kind, \
+             name_has_private_use=excluded.name_has_private_use;",
             values(r),
         )?;
     }
@@ -231,6 +237,7 @@ mod tests {
             use_invoice: false,
             status: Status::Active.as_str(),
             kind: Kind::Business.as_str(),
+            name_has_private_use: false,
             suspension_date: None,
             suspension_date_iso: None,
             industries: vec![],
@@ -280,7 +287,9 @@ mod tests {
         assert!(migrate.contains("ALTER TABLE ubn ADD COLUMN suspension_date TEXT;"));
         assert!(migrate.contains("ALTER TABLE ubn ADD COLUMN suspension_date_iso TEXT;"));
         assert!(migrate.contains("ALTER TABLE ubn ADD COLUMN kind TEXT;"));
+        assert!(migrate.contains("ALTER TABLE ubn ADD COLUMN name_has_private_use INTEGER;"));
         assert!(schema.contains("kind TEXT"));
+        assert!(schema.contains("name_has_private_use INTEGER"));
         let sql = std::fs::read_to_string(&p).unwrap();
         assert!(sql.contains("'O''Reilly 商行'"));
         assert!(sql.contains("ON CONFLICT(ban) DO UPDATE"));
@@ -288,7 +297,8 @@ mod tests {
         assert!(sql.contains("'2026-01-01'"));
         assert!(sql.contains("suspension_date=excluded.suspension_date"));
         assert!(sql.contains("kind=excluded.kind"));
-        assert!(sql.contains("'business')"));
+        assert!(sql.contains("name_has_private_use=excluded.name_has_private_use"));
+        assert!(sql.contains("'business', 0)"));
         assert!(sql.contains("DELETE FROM ubn WHERE ban IN ('10000009');"));
         assert!(!sql.contains("BEGIN")); // D1 import manages the transaction
     }
@@ -317,6 +327,8 @@ mod tests {
         let mut r = rec("10000001", "new");
         r.status = Status::Closed.as_str();
         r.kind = Kind::Nonprofit.as_str();
+        r.name = "大三\u{F961C}慈惠寺".into();
+        r.name_has_private_use = true;
         let prev = HashMap::from([("10000001".to_string(), 0xdead_beef_u64)]);
         let hashes = vec![row_hash(&r)];
         let d = diff(&prev, std::slice::from_ref(&r), &hashes);
@@ -325,13 +337,17 @@ mod tests {
         write_delta_sql(&[r], &d, &delta_path).unwrap();
         conn.execute_batch(&std::fs::read_to_string(&delta_path).unwrap())
             .unwrap();
-        let (name, status, kind): (String, String, String) = conn
-            .query_row("SELECT name, status, kind FROM ubn", [], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-            })
+        let (name, status, kind, pua): (String, String, String, i64) = conn
+            .query_row(
+                "SELECT name, status, kind, name_has_private_use FROM ubn",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
             .unwrap();
-        assert_eq!((name.as_str(), status.as_str()), ("new", "closed"));
+        assert_eq!(name, "大三\u{F961C}慈惠寺");
+        assert_eq!(status, "closed");
         assert_eq!(kind, "nonprofit");
+        assert_eq!(pua, 1);
     }
 
     #[test]

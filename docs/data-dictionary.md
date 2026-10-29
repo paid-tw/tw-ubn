@@ -53,7 +53,7 @@ UTF-8, no BOM. Original header → field name used in this repo:
 | 營業地址 | `address` | Quoted; may contain full-width digits |
 | 統一編號 | `ban` | 8-digit UBN (primary key) |
 | 總機構統一編號 | `hq_ban` | HQ UBN for branches; usually empty |
-| 營業人名稱 | `name` | **Invoice title (抬頭)** |
+| 營業人名稱 | `name` | **Invoice title (抬頭)**. May contain Private Use Area characters; see `name_has_private_use` |
 | 資本額 | `capital` | Integer TWD, as text |
 | 設立日期 | `setup_date` | ROC date (e.g. `0760321`); use `rocToISO()` |
 | 組織別名稱 | `org_type` | 獨資 / 股份有限公司 / … |
@@ -172,7 +172,9 @@ See `crates/ubn-build` (`src/main.rs`). `manifest.json` records `dataDate`,
 `rows`, `shards` (default 8192), and `hash` (`fnv1a-32`) so clients shard
 identically.
 
-`shards/<n>.json` is a JSON array of `{ban, name, address, useInvoice, status, kind}`.
+`shards/<n>.json` is a JSON array of `{ban, name, address, useInvoice, status, kind}`,
+plus `nameHasPrivateUse: true` on rows whose name has a
+[Private Use Area character](#private-use-area-characters-in-name).
 
 For D1, the build also emits `d1/schema.sql` (create), `d1/migrate.sql`
 (idempotent `ADD COLUMN` for older tables), `d1/delta.sql` (the day's upserts +
@@ -196,6 +198,35 @@ dataset, the shards, `ubn.sqlite` and D1. Shards built before it existed omit
 it, and D1 rows loaded before it have `kind` NULL until that row is next
 upserted; a missing `kind` means unknown. Adding `kind` changed every row's
 hash, so the first build after it upserts every row into D1 once.
+
+### Private Use Area characters in `name`
+
+`name` is published exactly as the registry has it, and some names contain
+Unicode Private Use Area (PUA) code points — characters the tax-registry
+system defined locally (造字). They render as boxes in ordinary fonts, and an
+e-invoice platform is unlikely to accept them in a buyer title. On the
+2026-10-29/30 files, 472 business names (463 active, 9 suspended), 34
+nonprofit names and 3 school names contain one; e.g. `00426115` ends in
+U+F585, and the most common code point is U+FA3FE.
+
+A row whose `name` has any code point in U+E000–U+F8FF, U+F0000–U+FFFFD or
+U+100000–U+10FFFD carries a flag:
+
+| Where | Field | Value |
+| --- | --- | --- |
+| `ubn.ndjson.gz` | `name_has_private_use` | `true`; **omitted** when false |
+| shards, lookup API | `nameHasPrivateUse` | `true`; **omitted** when false |
+| `ubn.sqlite`, D1 | `name_has_private_use` | `1` / `0`; NULL on D1 rows loaded before the column existed (= false) |
+
+`manifest.json` reports the number of flagged rows as `namesWithPrivateUse`.
+A client should not autofill a flagged name as an invoice title as is; let the
+buyer type it.
+
+The PUA characters are **not converted** to standard Unicode. Which
+private character set the registry uses (for example, whether it matches the
+CNS 11643 全字庫 mapping) has not been verified, so there is no conversion
+table. Because the flag is serialized only when true, adding it changed the
+row hash of flagged rows only.
 
 ## Licence
 

@@ -54,6 +54,10 @@ describe('worker lib parity with ubn-core', () => {
     const legacy = datasetResult({ ban: '22099131', name: '台積電', useInvoice: true });
     expect(legacy.status).toBeUndefined();
     expect(legacy.kind).toBeUndefined();
+    expect('nameHasPrivateUse' in legacy).toBe(false);
+
+    const pua = datasetResult({ ban: '02409186', name: '財團法人大三\u{F961C}慈惠寺', nameHasPrivateUse: true });
+    expect(pua.nameHasPrivateUse).toBe(true);
     expect(JSON.parse(JSON.stringify(legacy)).status).toBeUndefined();
   });
 
