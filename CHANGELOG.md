@@ -20,6 +20,12 @@ ship when merged to `main`.
 - `worker`, `worker-d1`: cache responses without CORS headers and apply the
   caller's CORS per request, so one origin's `Access-Control-Allow-Origin` is never
   served to another ([#5](https://github.com/paid-tw/tw-ubn/pull/5)).
+- `worker`, `worker-d1`: when FIA can't answer, `/v1/vat/:ban` now responds
+  `502` with `{ "found": null, "error": "upstream_unavailable" }` (never cached)
+  instead of `200 { "found": false }`, which was indistinguishable from "no such
+  business" and was cached for a day by `worker`. This changes the response
+  contract: treat a non-2xx as "no answer". `found: false` is cached only when the
+  dataset read succeeded and FIA returned 404 ([#15](https://github.com/paid-tw/tw-ubn/pull/15)).
 
 ## [0.1.1] - 2026-10-28
 
