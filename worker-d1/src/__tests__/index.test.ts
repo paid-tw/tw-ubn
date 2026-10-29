@@ -314,3 +314,95 @@ describe('cache is populated CORS-free', () => {
     expect(stored.headers.get('Vary')).toBeNull();
   });
 });
+
+describe('D1 row mapping', () => {
+  /**
+   * A D1 table holding `row`, with only `row`'s keys as columns: a query that
+   * names any other column fails like D1 does ("no such column").
+   */
+  const rowDb = (row: Record<string, unknown>) =>
+    ({
+      prepare: (sql: string) => {
+        const named = /^SELECT (.+) FROM/i.exec(sql)?.[1] ?? '*';
+        const missing = named === '*' ? [] : named.split(',').map((c) => c.trim()).filter((c) => !(c in row));
+        return {
+          bind: () => ({
+            first: () =>
+              missing.length
+                ? Promise.reject(new Error(`D1_ERROR: no such column: ${missing[0]}`))
+                : Promise.resolve(row),
+          }),
+        };
+      },
+    }) as unknown as D1Database;
+
+  const lookup = async (row: Record<string, unknown>) => {
+    const fia = upstream(() => Promise.resolve(new Response(null, { status: 404 })));
+    const res = await worker.fetch(new Request(`https://w/v1/vat/${row.ban}`), { UBN_DB: rowDb(row) }, ctx);
+    return { body: (await res.json()) as Record<string, unknown>, fia };
+  };
+
+  it('passes kind through', async () => {
+    const { body } = await lookup({
+      ban: '00532072',
+      name: '臺北市私立陽光森林麗湖幼兒園',
+      address: '臺北市',
+      use_invoice: 0,
+      status: 'closed',
+      kind: 'school',
+      setup_date_iso: null,
+    });
+    expect(body).toMatchObject({ found: true, status: 'closed', kind: 'school', useInvoice: false, source: 'dataset' });
+  });
+
+  it('still answers from D1 when the table predates the kind column', async () => {
+    // Worker deployed before the dataset workflow ran migrate.sql.
+    const { body, fia } = await lookup({
+      ban: '22099131',
+      name: '台灣積體電路製造股份有限公司',
+      address: '新竹市力行六路8號',
+      use_invoice: 1,
+      status: 'active',
+      setup_date_iso: '1987-02-21',
+    });
+    expect(body).toMatchObject({ found: true, ban: '22099131', status: 'active', source: 'dataset' });
+    expect('kind' in body).toBe(false);
+    expect(fia).not.toHaveBeenCalled();
+    expect('nameHasPrivateUse' in body).toBe(false);
+  });
+
+  it('passes the private-use flag through', async () => {
+    const { body } = await lookup({
+      ban: '02409186',
+      name: '財團法人大三\u{F961C}慈惠寺',
+      address: '臺中市',
+      use_invoice: 0,
+      status: 'active',
+      kind: 'nonprofit',
+      name_has_private_use: 1,
+      setup_date_iso: null,
+    });
+    expect(body).toMatchObject({ found: true, kind: 'nonprofit', nameHasPrivateUse: true, source: 'dataset' });
+  });
+
+  it('omits the flag for unflagged and NULL rows', async () => {
+    for (const flag of [0, null]) {
+      const { body } = await lookup({ ban: '22099131', name: '台積電', use_invoice: 1, status: 'active', kind: null, name_has_private_use: flag });
+      expect('nameHasPrivateUse' in body).toBe(false);
+      expect('kind' in body).toBe(false);
+    }
+  });
+
+  it('still answers from D1 when the table has kind but predates name_has_private_use', async () => {
+    const { body, fia } = await lookup({
+      ban: '00532072',
+      name: '臺北市私立陽光森林麗湖幼兒園',
+      use_invoice: 0,
+      status: 'closed',
+      kind: 'school',
+    });
+    expect(body).toMatchObject({ found: true, kind: 'school', source: 'dataset' });
+    expect('nameHasPrivateUse' in body).toBe(false);
+    expect(fia).not.toHaveBeenCalled();
+  });
+});

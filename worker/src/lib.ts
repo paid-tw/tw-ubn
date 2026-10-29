@@ -37,10 +37,15 @@ export function rocToISO(roc: string | null | undefined): string | null {
 }
 
 /**
- * `suspended` is 停業 (may resume); `closed` is terminated (解散, 廢止, 撤銷 …)
- * and only ever comes from GCIS, since a closed business leaves the tax registry.
+ * `suspended` is 停業 (may resume); `closed` is terminated (解散, 廢止, 撤銷 …).
+ * A closed business leaves the tax registry, so for `kind: business` it only
+ * comes from GCIS; dataset rows are `closed` only for withholding units
+ * (deregistered schools / nonprofits).
  */
 export type RegistryStatus = 'active' | 'suspended' | 'closed';
+
+/** Which register the UBN came from: VAT business or a withholding unit. */
+export type RegistryKind = 'business' | 'nonprofit' | 'school' | 'agency';
 
 /** One object inside a published `shards/<n>.json` file. */
 export interface ShardRow {
@@ -53,6 +58,14 @@ export interface ShardRow {
    * unknown, not active. The suspension date is not part of the shard.
    */
   status?: RegistryStatus;
+  /** Omitted on shards built before the withholding-unit sources; missing means unknown. */
+  kind?: RegistryKind;
+  /**
+   * Present (and `true`) only when `name` holds a Unicode Private Use Area
+   * character (the registry's 造字), which most fonts render as a box. Absent
+   * means false; don't autofill such a name as an invoice title as is.
+   */
+  nameHasPrivateUse?: true;
 }
 
 export interface UBNResult {
@@ -64,6 +77,10 @@ export interface UBNResult {
   setupDate?: string | null;
   /** Carried from the shard when present. See `ShardRow.status`. */
   status?: RegistryStatus;
+  /** Carried from the shard when present. See `ShardRow.kind`. */
+  kind?: RegistryKind;
+  /** Carried from the shard; only ever `true`. See `ShardRow.nameHasPrivateUse`. */
+  nameHasPrivateUse?: true;
   source?: 'dataset' | 'fia-api' | 'gcis';
   /** GCIS only: the raw `Company_Status_Desc`, e.g. 核准設立 / 解散. */
   companyStatus?: string;
@@ -71,7 +88,7 @@ export interface UBNResult {
   closedDate?: string | null;
 }
 
-/** Map a dataset shard row onto the lookup result, including `status` when the shard has it. */
+/** Map a dataset shard row onto the lookup result, including `status` / `kind` when the shard has them. */
 export function datasetResult(row: ShardRow): UBNResult {
   return {
     found: true,
@@ -80,6 +97,8 @@ export function datasetResult(row: ShardRow): UBNResult {
     address: row.address,
     useInvoice: row.useInvoice,
     status: row.status,
+    kind: row.kind,
+    ...(row.nameHasPrivateUse ? { nameHasPrivateUse: true as const } : {}),
     source: 'dataset',
   };
 }

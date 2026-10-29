@@ -27,10 +27,15 @@ export function rocToISO(roc: string | null | undefined): string | null {
 }
 
 /**
- * `suspended` is 停業 (may resume); `closed` is terminated (解散, 廢止, 撤銷 …)
- * and only ever comes from GCIS, since a closed business leaves the tax registry.
+ * `suspended` is 停業 (may resume); `closed` is terminated (解散, 廢止, 撤銷 …).
+ * A closed business leaves the tax registry, so for `kind: business` it only
+ * comes from GCIS; dataset rows are `closed` only for withholding units
+ * (deregistered schools / nonprofits).
  */
 export type RegistryStatus = 'active' | 'suspended' | 'closed';
+
+/** Which register the UBN came from: VAT business or a withholding unit. */
+export type RegistryKind = 'business' | 'nonprofit' | 'school' | 'agency';
 
 export interface UBNResult {
   found: boolean;
@@ -39,6 +44,13 @@ export interface UBNResult {
   address?: string;
   useInvoice?: boolean;
   status?: RegistryStatus;
+  /** Unset on rows loaded before `kind` existed. */
+  kind?: RegistryKind;
+  /**
+   * Present (and `true`) only when `name` holds a Unicode Private Use Area
+   * character (the registry's 造字). Absent means false.
+   */
+  nameHasPrivateUse?: true;
   setupDate?: string | null;
   source?: 'dataset' | 'fia-api' | 'gcis';
   /** GCIS only: the raw `Company_Status_Desc`, e.g. 核准設立 / 解散. */

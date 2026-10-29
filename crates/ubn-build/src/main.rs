@@ -5,10 +5,21 @@
 //!   suspended https://eip.fia.gov.tw/data/BGMOPEN1X.csv (plain CSV)
 //! Merging the two gives a `status` dimension without needing GCIS.
 //!
+//! Withholding units (verified 2026-10-29; formats in `withholding.rs`):
+//!   nonprofit https://eip.fia.gov.tw/data/BGMOPEN99.csv
+//!   school    https://eip.fia.gov.tw/data/BGMOPEN99X.csv
+//!   agency    https://www.fia.gov.tw/download/9bc4de1485014443b518beb37d8f35fe
+//! These add UBNs that are not VAT-registered, tagged with `kind`. On a UBN
+//! present in several files, precedence is active > suspended > school >
+//! nonprofit > agency: the business registry always wins, the school list is
+//! the most specific withholding set (its 458 overlaps with BGMOPEN99 on
+//! 2026-10-29 are school foundations, with identical status), and the agency
+//! list carries no status at all.
+//!
 //! Outputs, under --out (default ./dist):
 //!   ubn.ndjson.gz       full dataset, one JSON object per line
 //!   ubn.sqlite          full dataset, indexed on ban
-//!   shards/<n>.json     per-UBN shards (ban -> {name,address,useInvoice,status})
+//!   shards/<n>.json     per-UBN shards (ban -> {name,address,useInvoice,status,kind})
 //!   state.tsv           ban -> content hash, for the next run to diff against
 //!   d1/schema.sql       CREATE TABLE IF NOT EXISTS (apply once)
 //!   d1/migrate.sql      idempotent ADD COLUMN for pre-existing databases
@@ -20,16 +31,22 @@
 //! Usage:
 //!   ubn-build [--out DIR] [--shards N] [--prev state.tsv]
 //!             [--active-zip PATH] [--suspended-csv PATH] [--no-suspended]
+//!             [--nonprofit-csv PATH] [--school-csv PATH] [--agency-csv PATH]
+//!             [--no-nonprofit] [--no-school] [--no-agency] [--no-withholding]
 //! When the local paths are omitted the files are fetched over HTTPS.
+//! `--no-withholding` skips all three withholding-unit files.
 //! Pass the previous run's state.tsv as --prev so d1/delta.sql holds only the
 //! day's changes; without it, the delta is a full load.
 
 mod attribution;
 mod incremental;
 mod transform;
+mod withholding;
 
 use anyhow::{bail, Context, Result};
-use attribution::{IncludedSource, ACTIVE_URL, SUSPENDED_URL};
+use attribution::{
+    IncludedSource, Sources, ACTIVE_URL, AGENCY_URL, NONPROFIT_URL, SCHOOL_URL, SUSPENDED_URL,
+};
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use rusqlite::{params, Connection};
@@ -37,8 +54,9 @@ use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::{BufWriter, Read, Write};
 use std::path::PathBuf;
-use transform::{parse_csv, Record, ShardRecord, Status};
+use transform::{parse_csv, Parsed, Record, ShardRecord, Status};
 use ubn_core::shard_of;
+use withholding::{parse_withholding_csv, Source};
 
 struct Args {
     out: PathBuf,
@@ -46,7 +64,17 @@ struct Args {
     active_zip: Option<PathBuf>,
     suspended_csv: Option<PathBuf>,
     no_suspended: bool,
+    nonprofit: WithholdingArg,
+    school: WithholdingArg,
+    agency: WithholdingArg,
     prev: Option<PathBuf>,
+}
+
+/// `--<name>-csv PATH` / `--no-<name>` for one withholding-unit file.
+#[derive(Default)]
+struct WithholdingArg {
+    csv: Option<PathBuf>,
+    skip: bool,
 }
 
 fn parse_args() -> Result<Args> {
@@ -56,6 +84,9 @@ fn parse_args() -> Result<Args> {
         active_zip: None,
         suspended_csv: None,
         no_suspended: false,
+        nonprofit: WithholdingArg::default(),
+        school: WithholdingArg::default(),
+        agency: WithholdingArg::default(),
         prev: None,
     };
     let mut it = std::env::args().skip(1);
@@ -67,6 +98,17 @@ fn parse_args() -> Result<Args> {
             "--active-zip" => a.active_zip = Some(PathBuf::from(next()?)),
             "--suspended-csv" => a.suspended_csv = Some(PathBuf::from(next()?)),
             "--no-suspended" => a.no_suspended = true,
+            "--nonprofit-csv" => a.nonprofit.csv = Some(PathBuf::from(next()?)),
+            "--school-csv" => a.school.csv = Some(PathBuf::from(next()?)),
+            "--agency-csv" => a.agency.csv = Some(PathBuf::from(next()?)),
+            "--no-nonprofit" => a.nonprofit.skip = true,
+            "--no-school" => a.school.skip = true,
+            "--no-agency" => a.agency.skip = true,
+            "--no-withholding" => {
+                a.nonprofit.skip = true;
+                a.school.skip = true;
+                a.agency.skip = true;
+            }
             "--prev" => a.prev = Some(PathBuf::from(next()?)),
             other => bail!("unknown argument: {other}"),
         }
@@ -131,13 +173,15 @@ fn write_sqlite(records: &[Record], path: &std::path::Path) -> Result<()> {
            ban TEXT, name TEXT, address TEXT, capital TEXT,
            setup_date TEXT, setup_date_iso TEXT, org_type TEXT,
            use_invoice INTEGER, status TEXT, industries TEXT,
-           suspension_date TEXT, suspension_date_iso TEXT);",
+           suspension_date TEXT, suspension_date_iso TEXT, kind TEXT,
+           name_has_private_use INTEGER);",
     )?;
     {
         let tx = conn.transaction()?;
         {
-            let mut stmt =
-                tx.prepare("INSERT INTO ubn VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)")?;
+            let mut stmt = tx.prepare(
+                "INSERT INTO ubn VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+            )?;
             for r in records {
                 stmt.execute(params![
                     r.ban,
@@ -152,6 +196,8 @@ fn write_sqlite(records: &[Record], path: &std::path::Path) -> Result<()> {
                     serde_json::to_string(&r.industries)?,
                     r.suspension_date,
                     r.suspension_date_iso,
+                    r.kind,
+                    r.name_has_private_use,
                 ])?;
             }
         }
@@ -162,16 +208,50 @@ fn write_sqlite(records: &[Record], path: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
-/// Suspended rows first so a duplicate UBN (unlikely) resolves to the active row.
-fn merge_records(suspended: Vec<Record>, active: Vec<Record>) -> Vec<Record> {
+/// Merge record sets given lowest precedence first: a row in a later set
+/// replaces an earlier row with the same UBN. `main` passes agency,
+/// nonprofit, school, suspended, active (see the module doc), so the business
+/// registry always wins and an active row beats a suspended duplicate.
+fn merge_records(layers: Vec<Vec<Record>>) -> Vec<Record> {
     let mut by_ban: BTreeMap<String, Record> = BTreeMap::new();
-    for r in suspended {
-        by_ban.insert(r.ban.clone(), r);
-    }
-    for r in active {
-        by_ban.insert(r.ban.clone(), r);
+    for layer in layers {
+        for r in layer {
+            by_ban.insert(r.ban.clone(), r);
+        }
     }
     by_ban.into_values().collect()
+}
+
+/// Load one withholding-unit file, or `None` when it is skipped.
+fn load_withholding(source: Source, arg: &WithholdingArg) -> Result<Option<Parsed>> {
+    if arg.skip {
+        return Ok(None);
+    }
+    let (url, label) = match source {
+        Source::Nonprofit => (NONPROFIT_URL, "nonprofit withholding units (BGMOPEN99)"),
+        Source::School => (SCHOOL_URL, "school withholding units (BGMOPEN99X)"),
+        Source::Agency => (AGENCY_URL, "agency withholding units"),
+    };
+    eprintln!("==> loading {label}");
+    let csv = match &arg.csv {
+        Some(p) => fs::read_to_string(p)?,
+        None => String::from_utf8(http_get(url)?)?,
+    };
+    let parsed = parse_withholding_csv(csv.as_bytes(), source)
+        .with_context(|| format!("parsing {label}"))?;
+    eprintln!(
+        "    {} rows (data date {:?})",
+        parsed.records.len(),
+        parsed.data_date
+    );
+    Ok(Some(parsed))
+}
+
+fn included(parsed: &Option<Parsed>) -> IncludedSource<'_> {
+    match parsed {
+        None => IncludedSource::Skipped,
+        Some(p) => IncludedSource::Loaded(p.data_date.as_deref()),
+    }
 }
 
 fn main() -> Result<()> {
@@ -204,7 +284,17 @@ fn main() -> Result<()> {
         );
         (suspended.records, suspended.data_date)
     };
-    let records = merge_records(suspended_records, active.records);
+    let mut nonprofit = load_withholding(Source::Nonprofit, &args.nonprofit)?;
+    let mut school = load_withholding(Source::School, &args.school)?;
+    let mut agency = load_withholding(Source::Agency, &args.agency)?;
+    let take = |p: &mut Option<Parsed>| p.as_mut().map(|p| std::mem::take(&mut p.records));
+    let records = merge_records(vec![
+        take(&mut agency).unwrap_or_default(),
+        take(&mut nonprofit).unwrap_or_default(),
+        take(&mut school).unwrap_or_default(),
+        suspended_records,
+        active.records,
+    ]);
     eprintln!("==> {} records (data date {:?})", records.len(), data_date);
 
     eprintln!("==> writing shards ({})", args.shards);
@@ -246,10 +336,19 @@ fn main() -> Result<()> {
     } else {
         IncludedSource::Loaded(suspended_date.as_deref())
     };
-    let manifest = manifest_json(
-        data_date.as_deref(),
+    let sources = Sources {
+        active: data_date.as_deref(),
         suspended,
+        nonprofit: included(&nonprofit),
+        school: included(&school),
+        agency: included(&agency),
+    };
+    let names_with_private_use = records.iter().filter(|r| r.name_has_private_use).count();
+    eprintln!("==> {names_with_private_use} names contain Private Use Area characters");
+    let manifest = manifest_json(
+        &sources,
         records.len(),
+        names_with_private_use,
         args.shards,
         &chrono_now(),
         &delta,
@@ -266,21 +365,18 @@ fn main() -> Result<()> {
 
 /// Attribution from this branch, plus the incremental `delta` counts main added.
 fn manifest_json(
-    active_date: Option<&str>,
-    suspended: IncludedSource<'_>,
+    sources: &Sources<'_>,
     rows: usize,
+    names_with_private_use: usize,
     shards: u32,
     built_at: &str,
     delta: &incremental::Diff,
     had_previous: bool,
 ) -> Result<serde_json::Value> {
-    let mut manifest = serde_json::to_value(attribution::build_manifest(
-        active_date,
-        suspended,
-        rows,
-        shards,
-        built_at,
-    ))?;
+    let mut manifest =
+        serde_json::to_value(attribution::build_manifest(sources, rows, shards, built_at))?;
+    // Rows whose name has a Private Use Area character (`nameHasPrivateUse`).
+    manifest["namesWithPrivateUse"] = serde_json::json!(names_with_private_use);
     manifest["delta"] = serde_json::json!({
         "upserts": delta.upserts.len(),
         "deletes": delta.deletes.len(),

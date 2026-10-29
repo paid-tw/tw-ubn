@@ -12,6 +12,10 @@ use serde::Serialize;
 
 pub const ACTIVE_URL: &str = "https://eip.fia.gov.tw/data/BGMOPEN1.zip";
 pub const SUSPENDED_URL: &str = "https://eip.fia.gov.tw/data/BGMOPEN1X.csv";
+pub const NONPROFIT_URL: &str = "https://eip.fia.gov.tw/data/BGMOPEN99.csv";
+pub const SCHOOL_URL: &str = "https://eip.fia.gov.tw/data/BGMOPEN99X.csv";
+/// Served as `機關名單.csv`; the path is an opaque download id on fia.gov.tw.
+pub const AGENCY_URL: &str = "https://www.fia.gov.tw/download/9bc4de1485014443b518beb37d8f35fe";
 
 pub const PROVIDER: &str = "財政部財政資訊中心";
 /// Official title. The hyphen is U+FF0D, as on data.gov.tw/license.
@@ -23,8 +27,14 @@ pub const STATEMENT: &str = "此開放資料依政府資料開放授權條款 (O
 
 pub const ACTIVE_DATASET: &str = "全國營業(稅籍)登記資料集";
 pub const SUSPENDED_DATASET: &str = "全國營業(稅籍)登記(停業)資料集";
+pub const NONPROFIT_DATASET: &str = "非營利事業機關團體資料集";
+pub const SCHOOL_DATASET: &str = "全國各級學校統一編號資料集";
+pub const AGENCY_DATASET: &str = "行政院所屬各機關同意開放統一編號資料集";
 const ACTIVE_CATALOG: &str = "https://data.gov.tw/dataset/9400";
 const SUSPENDED_CATALOG: &str = "https://data.gov.tw/dataset/75140";
+const NONPROFIT_CATALOG: &str = "https://data.gov.tw/dataset/34147";
+const SCHOOL_CATALOG: &str = "https://data.gov.tw/dataset/75136";
+const AGENCY_CATALOG: &str = "https://data.gov.tw/dataset/44806";
 
 const SOURCE_AGENCY: &str = "財政部財政資訊中心 (Fiscal Information Agency, Ministry of Finance)";
 
@@ -32,20 +42,34 @@ const SOURCE_AGENCY: &str = "財政部財政資訊中心 (Fiscal Information Age
 /// the file had one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IncludedSource<'a> {
-    /// Not loaded (`--no-suspended`).
+    /// Not loaded (`--no-suspended`, `--no-nonprofit`, …).
     Skipped,
-    /// Loaded. `None` means the sentinel row was missing.
+    /// Loaded. `None` means the sentinel row was missing (the agency list
+    /// never has one).
     Loaded(Option<&'a str>),
+}
+
+/// Every source file a build can include, with its sentinel date.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Sources<'a> {
+    /// `BGMOPEN1`, always loaded.
+    pub active: Option<&'a str>,
+    pub suspended: IncludedSource<'a>,
+    pub nonprofit: IncludedSource<'a>,
+    pub school: IncludedSource<'a>,
+    pub agency: IncludedSource<'a>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AttributedDataset {
     pub name: &'static str,
-    /// Gregorian year derived from a `DD-MON-YY` sentinel, when it parses.
+    /// Gregorian year derived from a `DD-MON-YY` or ROC `YYYMMDD` sentinel,
+    /// when it parses.
     pub year: Option<String>,
-    /// Sentinel date (`28-OCT-26`). That stamp is the upstream version label;
-    /// the files are replaced daily and have no separate version number.
+    /// Sentinel date (`28-OCT-26`, or `1151030` for `BGMOPEN99`). That stamp
+    /// is the upstream version label; the files are replaced in place and
+    /// have no separate version number.
     pub version: Option<String>,
     pub url: &'static str,
     pub catalog: &'static str,
@@ -80,15 +104,10 @@ pub struct Manifest {
     pub attribution: Attribution,
 }
 
-pub fn build_manifest(
-    active_date: Option<&str>,
-    suspended: IncludedSource<'_>,
-    rows: usize,
-    shards: u32,
-    built_at: &str,
-) -> Manifest {
-    let attribution = attribution(active_date, suspended);
-    let (suspended_source, suspended_data_date) = match suspended {
+pub fn build_manifest(sources: &Sources<'_>, rows: usize, shards: u32, built_at: &str) -> Manifest {
+    let attribution = attribution(sources);
+    let active_date = sources.active;
+    let (suspended_source, suspended_data_date) = match sources.suspended {
         IncludedSource::Skipped => (None, None),
         IncludedSource::Loaded(date) => (Some(SUSPENDED_URL), date.map(str::to_string)),
     };
@@ -108,20 +127,33 @@ pub fn build_manifest(
     }
 }
 
-fn attribution(active_date: Option<&str>, suspended: IncludedSource<'_>) -> Attribution {
+fn attribution(sources: &Sources<'_>) -> Attribution {
     let mut datasets = vec![dataset(
         ACTIVE_DATASET,
         ACTIVE_URL,
         ACTIVE_CATALOG,
-        active_date,
+        sources.active,
     )];
-    if let IncludedSource::Loaded(date) = suspended {
-        datasets.push(dataset(
+    let optional = [
+        (
+            sources.suspended,
             SUSPENDED_DATASET,
             SUSPENDED_URL,
             SUSPENDED_CATALOG,
-            date,
-        ));
+        ),
+        (
+            sources.nonprofit,
+            NONPROFIT_DATASET,
+            NONPROFIT_URL,
+            NONPROFIT_CATALOG,
+        ),
+        (sources.school, SCHOOL_DATASET, SCHOOL_URL, SCHOOL_CATALOG),
+        (sources.agency, AGENCY_DATASET, AGENCY_URL, AGENCY_CATALOG),
+    ];
+    for (included, name, url, catalog) in optional {
+        if let IncludedSource::Loaded(date) = included {
+            datasets.push(dataset(name, url, catalog, date));
+        }
     }
     let exhibit = exhibit_line(&datasets);
     Attribution {
@@ -149,8 +181,12 @@ fn dataset(
     }
 }
 
-/// `28-OCT-26` → `2026`. Returns `None` when the stamp is not `DD-MON-YY`.
+/// `28-OCT-26` → `2026`, and ROC `1151030` → `2026` (the `BGMOPEN99`
+/// sentinel). Returns `None` for any other shape.
 fn year_from_sentinel(date: &str) -> Option<String> {
+    if date.len() == 7 && date.bytes().all(|b| b.is_ascii_digit()) {
+        return ubn_core::roc_to_iso(date).map(|iso| iso[..4].to_string());
+    }
     let mut parts = date.split('-');
     let day = parts.next()?;
     let month = parts.next()?;
@@ -202,10 +238,19 @@ mod tests {
 
     const OFFICIAL_STATEMENT: &str = "此開放資料依政府資料開放授權條款 (Open Government Data License) 進行公眾釋出，使用者於遵守本條款各項規定之前提下，得利用之。";
 
+    fn business_only<'a>(active: Option<&'a str>, suspended: IncludedSource<'a>) -> Sources<'a> {
+        Sources {
+            active,
+            suspended,
+            nonprofit: IncludedSource::Skipped,
+            school: IncludedSource::Skipped,
+            agency: IncludedSource::Skipped,
+        }
+    }
+
     fn both(active: Option<&str>, suspended: Option<&str>) -> Manifest {
         build_manifest(
-            active,
-            IncludedSource::Loaded(suspended),
+            &business_only(active, IncludedSource::Loaded(suspended)),
             11,
             32,
             "2026-10-27T22:00:00Z",
@@ -260,8 +305,7 @@ mod tests {
     #[test]
     fn skipping_suspended_omits_that_dataset() {
         let m = build_manifest(
-            Some("27-OCT-26"),
-            IncludedSource::Skipped,
+            &business_only(Some("27-OCT-26"), IncludedSource::Skipped),
             5,
             8,
             "2026-10-26T00:00:00Z",
@@ -276,6 +320,68 @@ mod tests {
             m.attribution.exhibit,
             "提供機關／單位 財政部財政資訊中心 2026 全國營業(稅籍)登記資料集（版本 27-OCT-26）"
         );
+    }
+
+    #[test]
+    fn every_loaded_withholding_source_is_attributed() {
+        let sources = Sources {
+            active: Some("30-OCT-26"),
+            suspended: IncludedSource::Loaded(Some("30-OCT-26")),
+            nonprofit: IncludedSource::Loaded(Some("1151030")),
+            school: IncludedSource::Loaded(Some("01-OCT-26")),
+            agency: IncludedSource::Loaded(None),
+        };
+        let m = build_manifest(&sources, 9, 32, "2026-10-29T22:00:00Z");
+        let names: Vec<_> = m.attribution.datasets.iter().map(|d| d.name).collect();
+        assert_eq!(
+            names,
+            [
+                ACTIVE_DATASET,
+                SUSPENDED_DATASET,
+                NONPROFIT_DATASET,
+                SCHOOL_DATASET,
+                AGENCY_DATASET
+            ]
+        );
+        let nonprofit = &m.attribution.datasets[2];
+        assert_eq!(nonprofit.url, NONPROFIT_URL);
+        assert_eq!(nonprofit.catalog, "https://data.gov.tw/dataset/34147");
+        assert_eq!(nonprofit.version.as_deref(), Some("1151030"));
+        assert_eq!(nonprofit.year.as_deref(), Some("2026")); // ROC 115
+        assert_eq!(m.attribution.datasets[3].url, SCHOOL_URL);
+        assert_eq!(
+            m.attribution.datasets[3].catalog,
+            "https://data.gov.tw/dataset/75136"
+        );
+        let agency = &m.attribution.datasets[4];
+        assert_eq!(agency.url, AGENCY_URL);
+        assert_eq!(agency.catalog, "https://data.gov.tw/dataset/44806");
+        assert!(agency.version.is_none());
+        assert!(agency.year.is_none());
+        assert_eq!(
+            m.attribution.exhibit,
+            "提供機關／單位 財政部財政資訊中心 2026 全國營業(稅籍)登記資料集（版本 30-OCT-26）、全國營業(稅籍)登記(停業)資料集（版本 30-OCT-26）、非營利事業機關團體資料集（版本 1151030）、全國各級學校統一編號資料集（版本 01-OCT-26）、行政院所屬各機關同意開放統一編號資料集（版本未標示）"
+        );
+
+        let partial = build_manifest(
+            &Sources {
+                school: IncludedSource::Skipped,
+                ..sources
+            },
+            9,
+            32,
+            "2026-10-29T22:00:00Z",
+        );
+        assert!(!partial.attribution.exhibit.contains(SCHOOL_DATASET));
+        assert!(partial.attribution.exhibit.contains(AGENCY_DATASET));
+    }
+
+    #[test]
+    fn year_parses_both_sentinel_shapes() {
+        assert_eq!(year_from_sentinel("28-OCT-26").as_deref(), Some("2026"));
+        assert_eq!(year_from_sentinel("1151030").as_deref(), Some("2026"));
+        assert_eq!(year_from_sentinel("1150000"), None);
+        assert_eq!(year_from_sentinel("115103"), None);
     }
 
     #[test]

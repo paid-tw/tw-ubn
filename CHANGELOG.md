@@ -20,6 +20,23 @@ ship when merged to `main`.
   live company not in the tax registry answers with its name and no `status`. New
   `NEGATIVE_CACHE_TTL` var (default 3600 s) for misses GCIS can't confirm
   ([#16](https://github.com/paid-tw/tw-ubn/pull/16)).
+- Dataset: schools and kindergartens, nonprofits (所得稅法 §11(4) bodies) and
+  Executive Yuan agencies — UBNs that are withholding units rather than
+  VAT-registered businesses — are now in the dataset, from the FIA's
+  `BGMOPEN99X`, `BGMOPEN99` and agency-list files. Every row, shard entry and
+  lookup result carries `kind` (`business`, `nonprofit`, `school` or `agency`),
+  and deregistered schools and nonprofits have `status: "closed"`. These rows
+  have `useInvoice: false` and only a county/city as `address`. New `ubn-build`
+  flags `--no-withholding`, `--no-nonprofit`, `--no-school`, `--no-agency` and
+  `--nonprofit-csv`/`--school-csv`/`--agency-csv`
+  ([#18](https://github.com/paid-tw/tw-ubn/pull/18)).
+- Dataset, `worker`, `worker-d1`: rows whose name contains a Unicode Private Use
+  Area character (the tax registry's locally-defined 造字, shown as a box in
+  most fonts) carry `nameHasPrivateUse: true` in shards and lookup results
+  (`name_has_private_use` in `ubn.ndjson.gz`, `ubn.sqlite` and D1), so a
+  checkout can avoid autofilling them as an invoice title. The name itself is
+  unchanged. `manifest.json` reports the count as `namesWithPrivateUse`
+  ([#20](https://github.com/paid-tw/tw-ubn/pull/20)).
 - `lookupTitle(ban, { baseUrl, signal?, timeoutMs?, fetchImpl? })` queries a
   deployed Worker's `/v1/vat/:ban` and resolves to `{ found: true, name, status?, … }`,
   `{ found: false }` (the Worker says there is no such registration), or `null`
