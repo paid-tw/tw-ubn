@@ -44,14 +44,14 @@ describe('worker-d1 before the dataset is loaded', () => {
     expect(put).not.toHaveBeenCalled();
   });
 
-  it('does not 1101 when D1 is empty and the FIA fallback is unreachable', async () => {
+  it('answers 502 (not a 1101) when D1 is empty and the FIA fallback is unreachable', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(() => Promise.reject(new Error('network error'))),
     );
     const res = await worker.fetch(new Request('https://w/v1/vat/22099131'), env, ctx);
-    expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ found: false, ban: '22099131' });
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ found: null, ban: '22099131', error: 'upstream_unavailable' });
   });
 
   it('caches a FIA hit taken while D1 is empty (the answer is authoritative)', async () => {
@@ -64,9 +64,7 @@ describe('worker-d1 before the dataset is loaded', () => {
     expect(put).toHaveBeenCalledTimes(1);
   });
 
-  it('does not cache a vat miss taken while D1 is empty (ban may load later)', async () => {
-    // FIA unreachable -> {found:false}, but D1 never authoritatively answered,
-    // so the ban might appear once the dataset loads: must not be pinned.
+  it('does not cache the 502 taken while D1 is empty and FIA is down', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(() => Promise.reject(new Error('network error'))),
@@ -101,6 +99,64 @@ describe('worker-d1 before the dataset is loaded', () => {
     expect(await res.json()).toMatchObject({ found: false, ban: '22099131' });
     expect(res.headers.get('Cache-Control')).toMatch(/max-age=/);
     expect(put).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('vat lookup with D1 loaded', () => {
+  const TSMC = { businessNm: '台灣積體電路製造股份有限公司', isUseInvoice: 'Y' };
+  /** A loaded D1 whose `ubn` lookup returns `row` (null for a clean miss). */
+  const loaded = (row: Record<string, unknown> | null): Env => ({
+    UBN_DB: { prepare: () => ({ bind: () => ({ first: () => Promise.resolve(row) }) }) } as unknown as D1Database,
+    ALLOWED_ORIGINS: 'https://a.example',
+  });
+  const fia = (impl: () => Promise<Response>) => {
+    const f = vi.fn(impl);
+    vi.stubGlobal('fetch', f);
+    return f;
+  };
+  const lookup = (e: Env) =>
+    worker.fetch(new Request('https://w/v1/vat/22099131', { headers: { Origin: 'https://a.example' } }), e, ctx);
+
+  it('answers a dataset hit from D1 without calling FIA, and caches it', async () => {
+    const f = fia(() => Promise.resolve(Response.json(TSMC)));
+    const res = await lookup(loaded({ ban: '22099131', name: '台積電', use_invoice: 1, status: 'active' }));
+    expect(await res.json()).toMatchObject({ found: true, name: '台積電', status: 'active', source: 'dataset' });
+    expect(f).not.toHaveBeenCalled();
+    expect(put).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to FIA on a D1 miss and caches the hit', async () => {
+    fia(() => Promise.resolve(Response.json(TSMC)));
+    const res = await lookup(loaded(null));
+    expect(await res.json()).toMatchObject({ found: true, source: 'fia-api' });
+    expect(put).toHaveBeenCalledTimes(1);
+  });
+
+  it('answers 502, uncached, when FIA returns a 5xx', async () => {
+    fia(() => Promise.resolve(new Response('busy', { status: 503 })));
+    const res = await lookup(loaded(null));
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ found: null, ban: '22099131', error: 'upstream_unavailable' });
+    expect(res.headers.get('Cache-Control')).toBe('no-store');
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('https://a.example');
+    expect(put).not.toHaveBeenCalled();
+  });
+
+  it('answers 502, uncached, when FIA is unreachable', async () => {
+    fia(() => Promise.reject(new Error('network error')));
+    const res = await lookup(loaded(null));
+    expect(res.status).toBe(502);
+    expect(put).not.toHaveBeenCalled();
+  });
+
+  it('answers 502, uncached, when FIA returns 200 with a non-JSON body', async () => {
+    fia(() => Promise.resolve(new Response('<html>maintenance</html>', { status: 200 })));
+    const res = await lookup(loaded(null));
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ found: null, ban: '22099131', error: 'upstream_unavailable' });
+    expect(res.headers.get('Cache-Control')).toBe('no-store');
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('https://a.example');
+    expect(put).not.toHaveBeenCalled();
   });
 });
 

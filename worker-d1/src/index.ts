@@ -39,16 +39,16 @@ export default {
         cacheable = true;
       } else {
         const fia = await fromFia(ban);
-        if (fia.ok) {
-          result = fia.value;
-          // A "not found" is authoritative only if D1 was too; when D1 errored
-          // the ban may just be in the not-yet-loaded dataset, so don't pin
-          // found:false in the cache for a day.
-          cacheable = fia.value.found || d1.ok;
-        } else {
-          result = { found: false, ban };
-          cacheable = false;
+        if (!fia.ok) {
+          // No authoritative answer: a found:false here would read as "no
+          // such business" to the caller. Say so explicitly, never cache it.
+          return json({ found: null, ban, error: 'upstream_unavailable' }, 502, cors);
         }
+        result = fia.value;
+        // A "not found" is authoritative only if D1 was too; when D1 errored
+        // the ban may just be in the not-yet-loaded dataset, so don't pin
+        // found:false in the cache for a day.
+        cacheable = fia.value.found || d1.ok;
       }
       // Cache CORS-free (the key is shared by all origins); apply the caller's
       // CORS per request so no single origin's allow header enters the cache.
@@ -124,10 +124,10 @@ async function fromFia(ban: string): Promise<Lookup<UBNResult>> {
   try {
     res = await fetch(`${FIA_API}/${ban}`);
   } catch (e) {
-    // FIA unreachable: {ok:false} (not a throw) so the handler answers
-    // {found:false} instead of letting it bubble up as a Cloudflare 1101.
-    // This matters most on a fresh deploy, where D1 is empty and FIA is the
-    // only source — a transient FIA blip must not take the whole worker down.
+    // FIA unreachable: {ok:false} (not a throw) so the handler answers 502
+    // instead of letting it bubble up as a Cloudflare 1101. This matters most
+    // on a fresh deploy, where D1 is empty and FIA is the only source — a
+    // transient FIA blip must not take the whole worker down.
     console.error('fia lookup failed', e);
     return { ok: false };
   }
@@ -135,7 +135,12 @@ async function fromFia(ban: string): Promise<Lookup<UBNResult>> {
   // it like an outage (not a cacheable miss).
   if (res.status === 404) return { ok: true, value: { found: false, ban } };
   if (!res.ok) return { ok: false };
-  return { ok: true, value: normalizeFia(ban, (await res.json()) as Record<string, unknown>) };
+  try {
+    return { ok: true, value: normalizeFia(ban, (await res.json()) as Record<string, unknown>) };
+  } catch (e) {
+    console.error('fia returned a non-JSON body', e);
+    return { ok: false };
+  }
 }
 
 /**
