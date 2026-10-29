@@ -173,13 +173,15 @@ fn write_sqlite(records: &[Record], path: &std::path::Path) -> Result<()> {
            ban TEXT, name TEXT, address TEXT, capital TEXT,
            setup_date TEXT, setup_date_iso TEXT, org_type TEXT,
            use_invoice INTEGER, status TEXT, industries TEXT,
-           suspension_date TEXT, suspension_date_iso TEXT, kind TEXT);",
+           suspension_date TEXT, suspension_date_iso TEXT, kind TEXT,
+           name_has_private_use INTEGER);",
     )?;
     {
         let tx = conn.transaction()?;
         {
-            let mut stmt =
-                tx.prepare("INSERT INTO ubn VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)")?;
+            let mut stmt = tx.prepare(
+                "INSERT INTO ubn VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+            )?;
             for r in records {
                 stmt.execute(params![
                     r.ban,
@@ -195,6 +197,7 @@ fn write_sqlite(records: &[Record], path: &std::path::Path) -> Result<()> {
                     r.suspension_date,
                     r.suspension_date_iso,
                     r.kind,
+                    r.name_has_private_use,
                 ])?;
             }
         }
@@ -340,9 +343,12 @@ fn main() -> Result<()> {
         school: included(&school),
         agency: included(&agency),
     };
+    let names_with_private_use = records.iter().filter(|r| r.name_has_private_use).count();
+    eprintln!("==> {names_with_private_use} names contain Private Use Area characters");
     let manifest = manifest_json(
         &sources,
         records.len(),
+        names_with_private_use,
         args.shards,
         &chrono_now(),
         &delta,
@@ -361,6 +367,7 @@ fn main() -> Result<()> {
 fn manifest_json(
     sources: &Sources<'_>,
     rows: usize,
+    names_with_private_use: usize,
     shards: u32,
     built_at: &str,
     delta: &incremental::Diff,
@@ -368,6 +375,8 @@ fn manifest_json(
 ) -> Result<serde_json::Value> {
     let mut manifest =
         serde_json::to_value(attribution::build_manifest(sources, rows, shards, built_at))?;
+    // Rows whose name has a Private Use Area character (`nameHasPrivateUse`).
+    manifest["namesWithPrivateUse"] = serde_json::json!(names_with_private_use);
     manifest["delta"] = serde_json::json!({
         "upserts": delta.upserts.len(),
         "deletes": delta.deletes.len(),
