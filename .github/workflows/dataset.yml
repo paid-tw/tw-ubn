@@ -5,7 +5,12 @@ on:
     # 23:30 UTC (~07:30 Asia/Taipei). MOF re-publishes the active zip ~21:00 UTC,
     # so running later avoids picking up the previous day's extract.
     - cron: '30 23 * * *'
-  workflow_dispatch: {} # manual trigger + keeps the schedule from auto-pausing
+  workflow_dispatch: # manual trigger + keeps the schedule from auto-pausing
+    inputs:
+      allow_shrink:
+        description: Publish even if rows dropped more than the sanity-check limit (intentional shrink)
+        type: boolean
+        default: false
 
 permissions:
   contents: write # create releases / upload assets
@@ -17,16 +22,24 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # R2 / D1 write credentials live in this environment, restricted to the
+    # default branch (see docs/operations.md). Until it is configured, repo-level
+    # secrets of the same names still resolve.
+    environment: dataset
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # Pinned to a master-branch commit; the toolchain must be explicit (see ci.yml).
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       # Previous run's state.tsv (held on the rolling `data-latest` release) lets
       # the pipeline emit only the day's delta. Absent on the first run.
       - name: Fetch previous state
         env:
           GH_TOKEN: ${{ github.token }}
+          ALLOW_SHRINK: ${{ inputs.allow_shrink == true }}
         run: |
           mkdir -p prev
           if gh release download data-latest --pattern 'state.tsv.gz' --dir prev 2>/dev/null; then
@@ -34,6 +47,25 @@ jobs:
             echo "PREV=--prev prev/state.tsv" >> "$GITHUB_ENV"
           else
             echo "no previous state (first run) — delta will be a full load"
+          fi
+          # Previous manifest, for the row-count sanity check. Only a confirmed
+          # "release not found" counts as a first run; any other lookup error,
+          # or a data-latest without manifest.json, fails the run so an outage
+          # can't disguise a row drop as a missing baseline.
+          if ASSETS=$(gh release view data-latest --json assets -q '.assets[].name' 2>&1); then
+            if grep -qx manifest.json <<<"$ASSETS"; then
+              gh release download data-latest --pattern manifest.json --dir prev
+            elif [ "$ALLOW_SHRINK" = true ]; then
+              echo "::warning::data-latest has no manifest.json; continuing because allow_shrink is set"
+            else
+              echo "::error::data-latest exists but has no manifest.json (re-run with allow_shrink to publish anyway)"
+              exit 1
+            fi
+          elif grep -q 'release not found' <<<"$ASSETS"; then
+            echo "no data-latest release (first run) — no baseline for the sanity check"
+          else
+            echo "::error::could not look up data-latest: $ASSETS"
+            exit 1
           fi
 
       - name: Build pipeline
@@ -48,6 +80,16 @@ jobs:
           echo "date=$(jq -r .dataDate dist/manifest.json)" >> "$GITHUB_OUTPUT"
           echo "tag=data-$(date +%Y%m%d)" >> "$GITHUB_OUTPUT"
           echo "delta=$(jq -c .delta dist/manifest.json)" >> "$GITHUB_OUTPUT"
+
+      # Gate: nothing below (release, data-latest state, D1, R2 latest.json) runs
+      # if the new build lost more than MAX_DROP_PCT of the previous rows, has
+      # no rows, or has a malformed manifest. Override an intentional shrink by
+      # running the workflow manually with allow_shrink; schedules can't set it.
+      - name: Sanity check
+        env:
+          ALLOW_SHRINK: ${{ inputs.allow_shrink == true }}
+          MAX_DROP_PCT: ${{ vars.DATASET_MAX_DROP_PCT }} # repo variable; empty = 1
+        run: node scripts/check-dataset.mjs dist/manifest.json prev/manifest.json
 
       # Full artifacts + the delta/state -> a dated GitHub Release, and the
       # rolling `data-latest` keeps the fresh state.tsv.gz for tomorrow's diff.
