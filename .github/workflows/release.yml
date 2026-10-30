@@ -15,9 +15,6 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write # gh release create
-      id-token: write
     defaults:
       run:
         working-directory: client
@@ -36,9 +33,18 @@ jobs:
       - run: pnpm test
       - run: pnpm build
       - run: npm publish --provenance --access public
+
+  # A separate job so a failed release can be re-run (Re-run failed jobs)
+  # without publishing to npm again, which would fail on the existing version.
+  github-release:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # gh release create
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # Not marked latest: the daily dataset release (`data-latest`) owns that slot.
       - name: Create GitHub Release
-        working-directory: .
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
