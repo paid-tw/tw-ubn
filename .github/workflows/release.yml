@@ -1,6 +1,7 @@
 name: Release client
 
-# Publish @paid-tw/ubn to npm on a tag like `ubn-v0.1.0`.
+# Publish @paid-tw/ubn to npm on a tag like `ubn-v0.1.0`, then create the
+# matching GitHub Release from that version's CHANGELOG.md section.
 # Uses npm OIDC trusted publishing (no token, with provenance): configure the
 # package's trusted publisher on npmjs.com to this repo + this workflow first.
 on:
@@ -14,6 +15,9 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # gh release create
+      id-token: write
     defaults:
       run:
         working-directory: client
@@ -32,3 +36,25 @@ jobs:
       - run: pnpm test
       - run: pnpm build
       - run: npm publish --provenance --access public
+      # Not marked latest: the daily dataset release (`data-latest`) owns that slot.
+      - name: Create GitHub Release
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#ubn-v}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; skipping."
+            exit 0
+          fi
+          awk -v h="## [$version]" 'index($0, h) == 1 { f = 1; next } /^## \[/ { f = 0 } f' \
+            CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          if ! grep -q '[^[:space:]]' "$RUNNER_TEMP/notes.md"; then
+            echo "::error::CHANGELOG.md has no section for [$version]"
+            exit 1
+          fi
+          printf "\n---\n\nnpm: [\`@paid-tw/ubn@%s\`](https://www.npmjs.com/package/@paid-tw/ubn/v/%s)\n" \
+            "$version" "$version" >> "$RUNNER_TEMP/notes.md"
+          gh release create "$TAG" --verify-tag --title "@paid-tw/ubn $version" \
+            --notes-file "$RUNNER_TEMP/notes.md" --latest=false
