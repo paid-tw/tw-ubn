@@ -112,9 +112,21 @@ jobs:
             ("Delta " + (.delta | tostring) + ".")
           ' dist/manifest.json > dist/release-notes.md
           gzip -kf dist/d1/full.sql
-          ASSETS="dist/ubn.ndjson.gz dist/ubn.sqlite dist/shards.tar.gz dist/manifest.json
-                  dist/state.tsv.gz dist/d1/schema.sql dist/d1/migrate.sql dist/d1/delta.sql
-                  dist/d1/full.sql.gz dist/changed-shards.txt"
+          # GitHub refuses a 0-byte asset (HTTP 400 Bad Content-Length), and
+          # `upload --clobber` deletes the existing asset before uploading, so
+          # one empty file (delta.sql on a same-day rerun with no changes)
+          # aborts the step after deleting assets it had not re-uploaded yet.
+          # Leave empty files out.
+          ASSETS=""
+          for f in dist/ubn.ndjson.gz dist/ubn.sqlite dist/shards.tar.gz dist/manifest.json \
+                   dist/state.tsv.gz dist/d1/schema.sql dist/d1/migrate.sql dist/d1/delta.sql \
+                   dist/d1/full.sql.gz dist/changed-shards.txt; do
+            if [ -s "$f" ]; then
+              ASSETS="$ASSETS $f"
+            else
+              echo "::notice::not uploading empty $f"
+            fi
+          done
           if ! gh release create "${{ steps.m.outputs.tag }}" $ASSETS \
                 --title "Dataset ${{ steps.m.outputs.date }}" \
                 --notes-file dist/release-notes.md; then
