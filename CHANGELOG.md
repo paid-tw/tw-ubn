@@ -11,6 +11,11 @@ ship when merged to `main`.
 
 ## [Unreleased]
 
+### Added
+
+- Release workflow: after publishing to npm, create the GitHub Release for the
+  `ubn-v*` tag, with that version's CHANGELOG.md section as its notes.
+
 ## [0.2.0] - 2026-10-29
 
 ### Added
