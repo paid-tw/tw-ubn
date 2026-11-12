@@ -21,6 +21,15 @@ module PaidTw
     WHITESPACE_RUN = /[#{WHITESPACE}]+/
     PRIVATE_USE = /\p{Co}/
 
+    # A capital sigma that ends a word: a cased letter before it and none after
+    # it, case-ignorable characters (combining marks, full stops, apostrophes,
+    # ...) skipped on both sides. ECMAScript's `toLowerCase` gives it the final
+    # form "ς"; Ruby's `downcase` knows no context and gives "σ". A character
+    # that is both cased and case-ignorable counts as ignorable, as JavaScript
+    # engines have it.
+    CASED = '[\p{Cased}&&\P{Case_Ignorable}]'
+    FINAL_SIGMA = /(#{CASED}\p{Case_Ignorable}*)Σ(?!\p{Case_Ignorable}*#{CASED})/
+
     STATUSES = %w[active suspended closed].freeze
     KINDS = %w[business nonprofit school agency].freeze
     SOURCES = %w[dataset fia-api gcis].freeze
@@ -170,9 +179,16 @@ module PaidTw
         .unicode_normalize(:nfkc)
         .tr('臺', '台')
         .gsub(WHITESPACE_RUN, '')
-        .downcase
+        .then { |stripped| lowercase(stripped) }
     rescue EncodingError
       ''
+    end
+
+    # `String#downcase` as ECMAScript's `toLowerCase` has it: see FINAL_SIGMA.
+    def lowercase(text)
+      return text.downcase unless text.include?('Σ')
+
+      text.gsub(FINAL_SIGMA, '\1ς').downcase
     end
 
     def utf8(value)
@@ -187,6 +203,6 @@ module PaidTw
       value if value.is_a?(String)
     end
 
-    private_class_method :get, :parse, :normalize_title, :utf8, :one_of, :string
+    private_class_method :get, :parse, :normalize_title, :lowercase, :utf8, :one_of, :string
   end
 end

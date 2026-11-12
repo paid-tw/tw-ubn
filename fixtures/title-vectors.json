@@ -118,6 +118,31 @@
       "full-width lower vs half-width upper",
       "ａｂｃ商行",
       "ABC商行"
+    ],
+    [
+      "Greek capital sigma ending a word (lowercases to the final form)",
+      "ΟΔΟΣ",
+      "οδος"
+    ],
+    [
+      "Greek capital sigma inside a word",
+      "ΣΟΦΙΑ",
+      "σοφια"
+    ],
+    [
+      "Greek capital sigma ending a word before CJK",
+      "ΟΔΟΣ商行",
+      "οδος商行"
+    ],
+    [
+      "Greek capital sigma ending a word before a full stop",
+      "ΟΔΟΣ.",
+      "οδος."
+    ],
+    [
+      "whitespace goes before case, so a space does not end a word",
+      "ΟΔΟΣ ΑΕ",
+      "οδοσαε"
     ]
   ],
   "different": [
@@ -145,6 +170,11 @@
       "different digits",
       "第123商行",
       "第124商行"
+    ],
+    [
+      "Greek final and non-final sigma",
+      "ΟΔΟΣ",
+      "οδοσ"
     ],
     [
       "both empty",
