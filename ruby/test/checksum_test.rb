@@ -25,6 +25,21 @@ class ChecksumTest < Minitest::Test
     end
   end
 
+  def test_rejects_strings_a_regexp_cannot_read_without_raising
+    [
+      "2209913\xFF", "2209913\xFF".b, '22099131'.encode('UTF-16LE'), '22099131'.encode('UTF-32BE'),
+      '22099131'.b.force_encoding('UTF-16LE')
+    ].each do |ban|
+      refute PaidTw::Ubn.valid?(ban), "#{ban.encoding.name} #{ban.bytes.inspect}"
+    end
+  end
+
+  def test_accepts_digits_in_any_ascii_compatible_encoding
+    ['22099131'.b, '22099131'.encode('US-ASCII'), '22099131'.encode('Big5')].each do |ban|
+      assert PaidTw::Ubn.valid?(ban), ban.encoding.name
+    end
+  end
+
   # 10458574 sums to 29: valid only because its seventh digit is 7, which may
   # count one more. 10458504 sums to 19 with no such allowance.
   def test_seventh_digit_seven_may_count_one_more

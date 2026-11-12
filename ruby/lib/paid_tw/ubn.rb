@@ -48,9 +48,13 @@ module PaidTw
 
     # True when `ban` is a well-formed 8-digit UBN under the post-2023 rule
     # (weighted digit sum divisible by 5). It says nothing about whether the
-    # number is registered.
+    # number is registered. Never raises: a value that is not a string, or a
+    # string whose bytes are invalid in its own encoding, is false.
     def valid?(ban)
-      return false unless ban.is_a?(String) && ban.match?(/\A[0-9]{8}\z/)
+      # A regexp raises on a string it cannot read: one with invalid bytes, or
+      # in an encoding that is not ASCII-compatible (UTF-16, UTF-32).
+      return false unless ban.is_a?(String) && ban.encoding.ascii_compatible? && ban.valid_encoding?
+      return false unless ban.match?(/\A[0-9]{8}\z/)
 
       sum = ban.each_char.with_index.sum do |char, index|
         product = char.to_i * WEIGHTS[index]
