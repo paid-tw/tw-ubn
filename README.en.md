@@ -171,6 +171,8 @@ GET https://<your-worker-d1>/v1/search?name=台灣積體      # name prefix sear
 crates/ubn-core    Rust: UBN checksum, FNV shard hash, ROC date (source of truth)
 crates/ubn-build   Rust: the build pipeline (a single binary, no external tools)
 client/            TypeScript: @paid-tw/ubn, the browser checkout client
+ruby/              Ruby: paid_tw-ubn, the server-side counterpart (see ruby/README.md)
+fixtures/          Test vectors shared by client/ and ruby/
 worker/            Cloudflare Worker (free): R2 shards + FIA fallback, one-click deploy
 worker-d1/         Cloudflare Worker (paid): D1 backend + name search, one-click deploy
 ```
@@ -200,10 +202,13 @@ CI runs it daily and publishes the artifacts; see
 ```bash
 cargo test                              # Rust: core + pipeline + real-UBN fixture
 cd client && pnpm install && pnpm test  # TS client (vitest) + pnpm build (tsc)
+cd ruby && bundle install && bundle exec rake test  # Ruby gem (minitest)
 ```
 
-The Rust core and the TS client re-implement the same ~3 functions; shared test
-vectors (see `client/src/__tests__`) keep them from drifting.
+The Rust core, the TS client and the Ruby gem re-implement the same few
+functions; shared test vectors keep them from drifting: the real-UBN sample in
+`crates/ubn-core/tests/fixtures` (all three) and the title and lookup-response
+vectors in `fixtures/` (TS and Ruby).
 
 ## Releasing the client (npm)
 
@@ -214,6 +219,18 @@ via **npm OIDC trusted publishing (no token, with provenance)**.
 ```bash
 cd client && npm version 0.1.1   # or edit package.json
 git tag ubn-v0.1.1 && git push origin ubn-v0.1.1
+```
+
+## Releasing the Ruby gem
+
+`paid_tw-ubn` (`ruby/`) is versioned on its own and publishes on a
+`ubn-rb-vX.Y.Z` tag: the [release workflow](.github/workflows/release-ruby.yml)
+tests, checks the tag against `lib/paid_tw/ubn/version.rb`, and pushes via
+**RubyGems OIDC trusted publishing (no API key)**.
+
+```bash
+# edit ruby/lib/paid_tw/ubn/version.rb, merge, then:
+git tag ubn-rb-v0.1.0 && git push origin ubn-rb-v0.1.0
 ```
 
 ## License

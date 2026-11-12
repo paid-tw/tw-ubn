@@ -149,6 +149,8 @@ GET https://<你的worker-d1>/v1/search?name=台灣積體      # 名稱前綴搜
 crates/ubn-core    Rust：統編檢查碼、FNV 分片雜湊、ROC 日期（權威來源）
 crates/ubn-build   Rust：建檔 pipeline（單一 binary，無外部工具鏈）
 client/            TypeScript：@paid-tw/ubn，瀏覽器結帳客戶端
+ruby/              Ruby：paid_tw-ubn，伺服器端的對應實作（見 ruby/README.md）
+fixtures/          client/ 與 ruby/ 共用的測試向量
 worker/            Cloudflare Worker（免費版）：R2 分片 + FIA fallback，可一鍵部署
 worker-d1/         Cloudflare Worker（付費版）：D1 後端 + 名稱搜尋，可一鍵部署
 ```
@@ -176,10 +178,12 @@ CI 每日執行並發布產物，見 [`.github/workflows/dataset.yml`](.github/w
 ```bash
 cargo test                              # Rust：core + pipeline + 真實統編 fixture
 cd client && pnpm install && pnpm test  # TS 客戶端（vitest）+ pnpm build（tsc）
+cd ruby && bundle install && bundle exec rake test  # Ruby gem（minitest）
 ```
 
-Rust core 與 TS 客戶端各自實作同樣的 ~3 個函式；共用的測試向量（見
-`client/src/__tests__`）確保兩邊不會走鐘。
+Rust core、TS 客戶端與 Ruby gem 各自實作同樣的幾個函式；共用的測試向量確保
+三邊不會走鐘：`crates/ubn-core/tests/fixtures` 的真實統編樣本（三邊共用），以及
+`fixtures/` 的抬頭比對與查詢回應向量（TS 與 Ruby 共用）。
 
 ## 發行客戶端（npm）
 
@@ -190,6 +194,18 @@ trusted publishing（免 token、附 provenance）** 發佈。
 ```bash
 cd client && npm version 0.1.1   # 更新 package.json 版本
 git tag ubn-v0.1.1 && git push origin ubn-v0.1.1
+```
+
+## 發行 Ruby gem
+
+`paid_tw-ubn`（`ruby/`）版本獨立，以 `ubn-rb-vX.Y.Z` tag 觸發發行：
+[release workflow](.github/workflows/release-ruby.yml) 會測試、核對 tag 與
+`lib/paid_tw/ubn/version.rb` 的版本，並以 **RubyGems OIDC trusted publishing
+（免 API key）** 發佈。
+
+```bash
+# 修改 ruby/lib/paid_tw/ubn/version.rb、合併後：
+git tag ubn-rb-v0.1.0 && git push origin ubn-rb-v0.1.0
 ```
 
 ## 授權

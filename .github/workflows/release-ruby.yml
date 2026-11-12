@@ -1,0 +1,39 @@
+name: Release Ruby gem
+
+# Publish paid_tw-ubn to RubyGems on a tag like `ubn-rb-v0.1.0`.
+# Uses RubyGems OIDC trusted publishing (no API key): configure the gem's
+# trusted publisher on rubygems.org to this repo + this workflow first.
+on:
+  push:
+    tags: ['ubn-rb-v*']
+
+permissions:
+  contents: read
+  id-token: write # OIDC trusted publishing
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ruby
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ruby/setup-ruby@b3aaceaef7e0ee231b499e7b5f49c03fc1d32199 # v1.338.0
+        with:
+          ruby-version: '3.4'
+          bundler-cache: true
+          working-directory: ruby
+      - run: bundle exec rake test
+      - name: Check the tag against the gem version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="$(ruby -r ./lib/paid_tw/ubn/version -e 'print PaidTw::Ubn::VERSION')"
+          if [ "ubn-rb-v$version" != "$TAG" ]; then
+            echo "::error::tag $TAG does not match gem version $version"
+            exit 1
+          fi
+      - run: gem build paid_tw-ubn.gemspec
+      - uses: rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a # v2.1.0
+      - run: gem push paid_tw-ubn-*.gem
