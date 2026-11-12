@@ -13,6 +13,13 @@ ship when merged to `main`.
 
 ### Added
 
+- Ruby gem `paid_tw-ubn` (`ruby/`), the server-side counterpart of the npm
+  client, versioned on its own and released on a `ubn-rb-v*` tag:
+  `PaidTw::Ubn.valid?`, `.same_title?`, `.private_use?` and `.lookup_title`,
+  which asks a deployed Worker's `/v1/vat/:ban` and, like `lookupTitle`, never
+  raises. Pure Ruby, no runtime dependencies, Ruby 3.2 or later.
+- `fixtures/`: the title-comparison and lookup-response test vectors, moved out
+  of the npm client's tests so the Ruby gem's tests read the same ones.
 - Release workflow: after publishing to npm, create the GitHub Release for the
   `ubn-v*` tag, with that version's CHANGELOG.md section as its notes.
 

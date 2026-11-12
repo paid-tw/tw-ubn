@@ -1,5 +1,17 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { lookupTitle } from '../lookupTitle.js';
+
+const vectors = JSON.parse(
+  readFileSync(
+    fileURLToPath(new URL('../../../fixtures/lookup-title-vectors.json', import.meta.url)),
+    'utf8',
+  ),
+) as {
+  ban: string;
+  cases: { label: string; status: number; body: string; expect: unknown }[];
+};
 
 const BAN = '22099131';
 const BASE = 'https://ubn.example.test';
@@ -42,107 +54,16 @@ describe('lookupTitle request', () => {
   );
 });
 
-describe('lookupTitle answers', () => {
-  it('returns a found record with its useful fields', async () => {
-    const res = await lookupTitle(BAN, {
-      baseUrl: BASE,
-      fetchImpl: respond({
-        found: true,
-        ban: BAN,
-        name: '台灣積體電路製造股份有限公司',
-        address: '新竹科學園區',
-        useInvoice: true,
-        status: 'active',
-        kind: 'business',
-        nameHasPrivateUse: false,
-        source: 'dataset',
-        companyStatus: '核准設立',
-        setupDate: '1987-02-21',
-      }),
-    });
-    expect(res).toEqual({
-      found: true,
-      ban: BAN,
-      name: '台灣積體電路製造股份有限公司',
-      address: '新竹科學園區',
-      useInvoice: true,
-      status: 'active',
-      kind: 'business',
-      source: 'dataset',
-      companyStatus: '核准設立',
-      setupDate: '1987-02-21',
-    });
-  });
-
-  it('keeps closed status and closedDate (caller decides)', async () => {
-    const res = await lookupTitle(BAN, {
-      baseUrl: BASE,
-      fetchImpl: respond({
-        found: true,
-        ban: BAN,
-        name: '某某商行',
-        status: 'closed',
-        source: 'gcis',
-        closedDate: '2024-05-01',
-      }),
-    });
-    expect(res).toMatchObject({ found: true, name: '某某商行', status: 'closed', closedDate: '2024-05-01' });
-  });
-
-  it('accepts a minimal found body and drops unknown enum values', async () => {
-    const res = await lookupTitle(BAN, {
-      baseUrl: BASE,
-      fetchImpl: respond({ found: true, name: '某某商行', status: 'weird', kind: 'alien', source: 'x' }),
-    });
-    expect(res).toEqual({ found: true, ban: BAN, name: '某某商行' });
-  });
-
-  it('returns found: false for an authoritative not-found', async () => {
-    const res = await lookupTitle(BAN, {
-      baseUrl: BASE,
-      fetchImpl: respond({ found: false, ban: BAN }),
-    });
-    expect(res).toEqual({ found: false });
+// Shared with the Ruby gem (ruby/test/lookup_title_test.rb): both
+// implementations MUST read every response the same way.
+describe('lookupTitle shared vectors', () => {
+  it.each(vectors.cases)('$label', async ({ status, body, expect: expected }) => {
+    const res = await lookupTitle(vectors.ban, { baseUrl: BASE, fetchImpl: respond(body, status) });
+    expect(res).toEqual(expected);
   });
 });
 
 describe('lookupTitle returns null (no answer)', () => {
-  it.each([
-    ['502 upstream_unavailable (#9)', { found: null, error: 'upstream_unavailable' }, 502],
-    ['503', { error: 'x' }, 503],
-    ['500', 'oops', 500],
-    ['404', 'not found', 404],
-    ['400 invalid_ubn', { found: false, ban: BAN, error: 'invalid_ubn' }, 400],
-    ['429', { found: false }, 429],
-  ])('on non-2xx: %s', async (_label, body, status) => {
-    await expect(
-      lookupTitle(BAN, { baseUrl: BASE, fetchImpl: respond(body, status) }),
-    ).resolves.toBeNull();
-  });
-
-  it.each([
-    ['malformed JSON', '{"found": tr'],
-    ['HTML error page', '<html>bad gateway</html>'],
-    ['JSON null', 'null'],
-    ['JSON array', '[]'],
-    ['JSON string', '"found"'],
-    ['found missing', { ban: BAN, name: '某某商行' }],
-    ['found null on 200', { found: null, ban: BAN }],
-    ['found as string', { found: 'true', ban: BAN, name: '某某商行' }],
-    ['found as number', { found: 1, ban: BAN, name: '某某商行' }],
-    ['ban mismatch', { found: true, ban: '87006234', name: '某某商行' }],
-    ['ban mismatch on not-found', { found: false, ban: '87006234' }],
-    ['name missing', { found: true, ban: BAN }],
-    ['name not a string', { found: true, ban: BAN, name: 42 }],
-    ['name empty', { found: true, ban: BAN, name: '' }],
-    ['name whitespace only', { found: true, ban: BAN, name: ' 　' }],
-    ['name with BMP PUA (#10)', { found: true, ban: BAN, name: '某某商行' }],
-    ['name with plane-15 PUA (#10)', { found: true, ban: BAN, name: '台北\u{FA3FE}行' }],
-    ['server flagged nameHasPrivateUse', { found: true, ban: BAN, name: '某某商行', nameHasPrivateUse: true }],
-  ])('on a 200 with %s', async (_label, body) => {
-    await expect(lookupTitle(BAN, { baseUrl: BASE, fetchImpl: respond(body) })).resolves.toBeNull();
-  });
-
   it('on a non-2xx with a stalled body, cancels the body and aborts the request', async () => {
     let cancelled = false;
     const body = new ReadableStream({

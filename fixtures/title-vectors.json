@@ -1,0 +1,195 @@
+{
+  "comment": "Shared by client/ (TypeScript) and ruby/. Characters outside the printable range are written as \\u escapes.",
+  "privateUse": [
+    [
+      "BMP PUA seen in the data (U+F585)",
+      "某某\uf585商行"
+    ],
+    [
+      "U+E000 (BMP start)",
+      "\ue000"
+    ],
+    [
+      "U+F8FF (BMP end)",
+      "a\uf8ffb"
+    ],
+    [
+      "U+F0000 (plane 15 start)",
+      "\udb80\udc00"
+    ],
+    [
+      "U+FA3FE (most frequent in the data)",
+      "台北\udba8\udffe行"
+    ],
+    [
+      "U+FFFFD (plane 15 end)",
+      "\udbbf\udffd"
+    ],
+    [
+      "U+100000 (plane 16 start)",
+      "\udbc0\udc00"
+    ],
+    [
+      "U+10FFFD (plane 16 end)",
+      "\udbff\udffd"
+    ]
+  ],
+  "notPrivateUse": [
+    [
+      "empty",
+      ""
+    ],
+    [
+      "ordinary CJK",
+      "台灣積體電路製造股份有限公司"
+    ],
+    [
+      "full-width Latin and space",
+      "ＡＢＣ\u3000有限公司"
+    ],
+    [
+      "U+D7FF (just before the surrogates)",
+      "\ud7ff"
+    ],
+    [
+      "U+F900 (CJK compatibility, just past BMP PUA)",
+      "豈"
+    ],
+    [
+      "plane-2 CJK (not PUA)",
+      "𠀀"
+    ],
+    [
+      "U+EFFFF (just before plane 15)",
+      "\udb7f\udfff"
+    ],
+    [
+      "U+FFFFE (noncharacter, not PUA)",
+      "\udbbf\udffe"
+    ]
+  ],
+  "same": [
+    [
+      "identical",
+      "台灣積體電路製造股份有限公司",
+      "台灣積體電路製造股份有限公司"
+    ],
+    [
+      "臺 vs 台",
+      "臺灣積體電路製造股份有限公司",
+      "台灣積體電路製造股份有限公司"
+    ],
+    [
+      "臺 on both sides, several times",
+      "臺北市臺灣商行",
+      "台北市台灣商行"
+    ],
+    [
+      "full-width vs half-width digits",
+      "第１２３商行",
+      "第123商行"
+    ],
+    [
+      "full-width vs half-width Latin",
+      "ＡＢＣ科技有限公司",
+      "ABC科技有限公司"
+    ],
+    [
+      "full-width vs half-width parentheses",
+      "台灣（股）公司",
+      "台灣(股)公司"
+    ],
+    [
+      "full-width space U+3000",
+      "台灣\u3000積體電路",
+      "台灣積體電路"
+    ],
+    [
+      "ASCII spaces, tabs and edges",
+      "  台灣 積體\t電路 ",
+      "台灣積體電路"
+    ],
+    [
+      "Latin case",
+      "Apple Asia LLC 台灣分公司",
+      "APPLE ASIA LLC台灣分公司"
+    ],
+    [
+      "full-width lower vs half-width upper",
+      "ａｂｃ商行",
+      "ABC商行"
+    ],
+    [
+      "Greek capital sigma ending a word (lowercases to the final form)",
+      "ΟΔΟΣ",
+      "οδος"
+    ],
+    [
+      "Greek capital sigma inside a word",
+      "ΣΟΦΙΑ",
+      "σοφια"
+    ],
+    [
+      "Greek capital sigma ending a word before CJK",
+      "ΟΔΟΣ商行",
+      "οδος商行"
+    ],
+    [
+      "Greek capital sigma ending a word before a full stop",
+      "ΟΔΟΣ.",
+      "οδος."
+    ],
+    [
+      "whitespace goes before case, so a space does not end a word",
+      "ΟΔΟΣ ΑΕ",
+      "οδοσαε"
+    ]
+  ],
+  "different": [
+    [
+      "different names",
+      "台灣積體電路製造股份有限公司",
+      "聯華電子股份有限公司"
+    ],
+    [
+      "legal form not abbreviated",
+      "台灣積體電路製造股份有限公司",
+      "台灣積體電路製造(股)公司"
+    ],
+    [
+      "legal form not stripped",
+      "台灣積體電路製造股份有限公司",
+      "台灣積體電路製造"
+    ],
+    [
+      "punctuation kept",
+      "A.B.C.商行",
+      "ABC商行"
+    ],
+    [
+      "different digits",
+      "第123商行",
+      "第124商行"
+    ],
+    [
+      "Greek final and non-final sigma",
+      "ΟΔΟΣ",
+      "οδοσ"
+    ],
+    [
+      "both empty",
+      "",
+      ""
+    ],
+    [
+      "both whitespace only",
+      " \u3000",
+      "\t"
+    ],
+    [
+      "one empty",
+      "台灣商行",
+      ""
+    ]
+  ]
+}
