@@ -107,7 +107,7 @@ class LookupTitleTest < Minitest::Test
 
   # The cases below run the built-in transport against a local socket.
 
-  def serve(response: nil)
+  def serve(response: nil, close: true)
     server = TCPServer.new('127.0.0.1', 0)
     requests = []
     connections = []
@@ -118,7 +118,7 @@ class LookupTitleTest < Minitest::Test
         requests << client.gets
         if response
           client.write(response)
-          client.close
+          client.close if close
         end
       end
     rescue IOError, Errno::EBADF
@@ -149,6 +149,20 @@ class LookupTitleTest < Minitest::Test
   def test_built_in_transport_treats_a_502_as_no_answer
     serve(response: http_response(502, '{"found":null,"error":"upstream_unavailable"}')) do |base_url, _requests|
       assert_nil PaidTw::Ubn.lookup_title(BAN, base_url: base_url)
+    end
+  end
+
+  # The status is known once the headers are in. An error body that never
+  # arrives must not hold the caller until the read timeout.
+  def test_built_in_transport_does_not_wait_for_the_body_of_a_502
+    headers = "HTTP/1.1 502 X\r\nContent-Type: application/json\r\nContent-Length: 1000\r\n\r\n"
+    serve(response: headers, close: false) do |base_url, _requests|
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      result = PaidTw::Ubn.lookup_title(BAN, base_url: base_url, timeout: 5)
+      elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+
+      assert_nil result
+      assert_operator elapsed, :<, 2
     end
   end
 

@@ -35,6 +35,7 @@ module PaidTw
     SOURCES = %w[dataset fia-api gcis].freeze
 
     DEFAULT_TIMEOUT = 2
+    SUCCESS = (200..299)
 
     # The answer of `lookup_title`. `found?` is false when the Worker answered
     # and no source it consulted has a record; every other field is then nil.
@@ -115,7 +116,7 @@ module PaidTw
 
       url = "#{base_url.to_s.sub(%r{/+\z}, '')}/v1/vat/#{ban}"
       status, body = (http || method(:get)).call(url, timeout)
-      return nil unless (200..299).cover?(status)
+      return nil unless SUCCESS.cover?(status)
 
       parse(JSON.parse(body), ban)
     rescue StandardError
@@ -135,10 +136,17 @@ module PaidTw
         # time a dead Worker can hold the caller.
         max_retries: 0
       }
-      response = Net::HTTP.start(uri.host, uri.port, **options) do |connection|
-        connection.get(uri.request_uri)
+      Net::HTTP.start(uri.host, uri.port, **options) do |connection|
+        connection.request_get(uri.request_uri) do |response|
+          status = response.code.to_i
+          # The status is all a non-2xx response has to say. Returning from
+          # inside the block leaves before Net::HTTP reads the body, and closes
+          # the connection: an error body that stalls or trickles holds no one.
+          return [status, nil] unless SUCCESS.cover?(status)
+
+          return [status, response.read_body]
+        end
       end
-      [response.code.to_i, response.body]
     end
 
     def parse(body, ban)
