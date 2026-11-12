@@ -42,4 +42,26 @@ class TitleTest < Minitest::Test
       refute PaidTw::Ubn.private_use?(broken), broken.encoding.name
     end
   end
+
+  # Replacing what cannot be read would make different titles equal: every
+  # unreadable byte would become the same U+FFFD.
+  def test_a_title_that_cannot_be_read_as_utf8_matches_nothing
+    [
+      ["ABC\xFF".b, "ABC�"],
+      ["ABC\xFF", "ABC�"],
+      ["ABC\xFF", "ABC\xFE"],
+      ["ABC\xFF", "ABC\xFF"],
+      ['台灣'.b, '商行'.b],
+      ['台灣'.b, '台灣']
+    ].each do |a, b|
+      refute PaidTw::Ubn.same_title?(a, b), [a, b].inspect
+      refute PaidTw::Ubn.same_title?(b, a), [b, a].inspect
+    end
+  end
+
+  def test_a_title_in_another_encoding_is_compared_by_its_characters
+    assert PaidTw::Ubn.same_title?('ABC'.b, 'abc')
+    assert PaidTw::Ubn.same_title?('臺灣商行'.encode('Big5'), '台灣商行')
+    assert PaidTw::Ubn.same_title?('台灣商行'.encode('UTF-16LE'), '台灣商行')
+  end
 end

@@ -76,6 +76,9 @@ module PaidTw
     # spellings of "tai" (U+81FA and U+53F0), all whitespace, and Latin case.
     # Legal forms are never stripped or abbreviated ("Co., Ltd." written in
     # full is not its bracketed short form), and an empty title matches nothing.
+    # Neither does a title with bytes that have no reading as UTF-8: a string
+    # in another encoding is compared by its characters, one that is broken or
+    # binary with non-ASCII bytes is not compared at all.
     def same_title?(a, b)
       normalized = normalize_title(a)
       !normalized.empty? && normalized == normalize_title(b)
@@ -156,12 +159,20 @@ module PaidTw
       )
     end
 
+    # A title that has no reading as UTF-8 normalizes to the empty title, which
+    # matches nothing. Replacing its unreadable bytes instead would turn each
+    # into the same U+FFFD and make different titles compare equal.
     def normalize_title(title)
-      utf8(title)
+      text = title.to_s.encode(Encoding::UTF_8)
+      return '' unless text.valid_encoding?
+
+      text
         .unicode_normalize(:nfkc)
         .tr('臺', '台')
         .gsub(WHITESPACE_RUN, '')
         .downcase
+    rescue EncodingError
+      ''
     end
 
     def utf8(value)
