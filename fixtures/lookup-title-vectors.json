@@ -1,0 +1,204 @@
+{
+  "comment": "Shared by client/ (TypeScript) and ruby/. Every case asks for `ban`; `body` is the raw response text. `expect` uses the wire (camelCase) field names; null means \"no answer\".",
+  "ban": "22099131",
+  "cases": [
+    {
+      "label": "a found record with its useful fields",
+      "status": 200,
+      "body": "{\"found\":true,\"ban\":\"22099131\",\"name\":\"台灣積體電路製造股份有限公司\",\"address\":\"新竹科學園區\",\"useInvoice\":true,\"status\":\"active\",\"kind\":\"business\",\"nameHasPrivateUse\":false,\"source\":\"dataset\",\"companyStatus\":\"核准設立\",\"setupDate\":\"1987-02-21\"}",
+      "expect": {
+        "found": true,
+        "ban": "22099131",
+        "name": "台灣積體電路製造股份有限公司",
+        "address": "新竹科學園區",
+        "useInvoice": true,
+        "status": "active",
+        "kind": "business",
+        "source": "dataset",
+        "companyStatus": "核准設立",
+        "setupDate": "1987-02-21"
+      }
+    },
+    {
+      "label": "closed status and closedDate are kept (caller decides)",
+      "status": 200,
+      "body": "{\"found\":true,\"ban\":\"22099131\",\"name\":\"某某商行\",\"status\":\"closed\",\"source\":\"gcis\",\"closedDate\":\"2024-05-01\"}",
+      "expect": {
+        "found": true,
+        "ban": "22099131",
+        "name": "某某商行",
+        "status": "closed",
+        "source": "gcis",
+        "closedDate": "2024-05-01"
+      }
+    },
+    {
+      "label": "a minimal found body; unknown enum values are dropped",
+      "status": 200,
+      "body": "{\"found\":true,\"name\":\"某某商行\",\"status\":\"weird\",\"kind\":\"alien\",\"source\":\"x\"}",
+      "expect": {
+        "found": true,
+        "ban": "22099131",
+        "name": "某某商行"
+      }
+    },
+    {
+      "label": "an authoritative not-found",
+      "status": 200,
+      "body": "{\"found\":false,\"ban\":\"22099131\"}",
+      "expect": {
+        "found": false
+      }
+    },
+    {
+      "label": "502 upstream_unavailable (#9)",
+      "status": 502,
+      "body": "{\"found\":null,\"error\":\"upstream_unavailable\"}",
+      "expect": null
+    },
+    {
+      "label": "503",
+      "status": 503,
+      "body": "{\"error\":\"x\"}",
+      "expect": null
+    },
+    {
+      "label": "500",
+      "status": 500,
+      "body": "oops",
+      "expect": null
+    },
+    {
+      "label": "404",
+      "status": 404,
+      "body": "not found",
+      "expect": null
+    },
+    {
+      "label": "400 invalid_ubn",
+      "status": 400,
+      "body": "{\"found\":false,\"ban\":\"22099131\",\"error\":\"invalid_ubn\"}",
+      "expect": null
+    },
+    {
+      "label": "429",
+      "status": 429,
+      "body": "{\"found\":false}",
+      "expect": null
+    },
+    {
+      "label": "200 with malformed JSON",
+      "status": 200,
+      "body": "{\"found\": tr",
+      "expect": null
+    },
+    {
+      "label": "200 with an HTML error page",
+      "status": 200,
+      "body": "<html>bad gateway</html>",
+      "expect": null
+    },
+    {
+      "label": "200 with JSON null",
+      "status": 200,
+      "body": "null",
+      "expect": null
+    },
+    {
+      "label": "200 with a JSON array",
+      "status": 200,
+      "body": "[]",
+      "expect": null
+    },
+    {
+      "label": "200 with a JSON string",
+      "status": 200,
+      "body": "\"found\"",
+      "expect": null
+    },
+    {
+      "label": "200 with found missing",
+      "status": 200,
+      "body": "{\"ban\":\"22099131\",\"name\":\"某某商行\"}",
+      "expect": null
+    },
+    {
+      "label": "200 with found null",
+      "status": 200,
+      "body": "{\"found\":null,\"ban\":\"22099131\"}",
+      "expect": null
+    },
+    {
+      "label": "200 with found as a string",
+      "status": 200,
+      "body": "{\"found\":\"true\",\"ban\":\"22099131\",\"name\":\"某某商行\"}",
+      "expect": null
+    },
+    {
+      "label": "200 with found as a number",
+      "status": 200,
+      "body": "{\"found\":1,\"ban\":\"22099131\",\"name\":\"某某商行\"}",
+      "expect": null
+    },
+    {
+      "label": "200 with a ban mismatch",
+      "status": 200,
+      "body": "{\"found\":true,\"ban\":\"87006234\",\"name\":\"某某商行\"}",
+      "expect": null
+    },
+    {
+      "label": "200 with a ban mismatch on not-found",
+      "status": 200,
+      "body": "{\"found\":false,\"ban\":\"87006234\"}",
+      "expect": null
+    },
+    {
+      "label": "200 with a null ban",
+      "status": 200,
+      "body": "{\"found\":true,\"ban\":null,\"name\":\"某某商行\"}",
+      "expect": null
+    },
+    {
+      "label": "200 with the name missing",
+      "status": 200,
+      "body": "{\"found\":true,\"ban\":\"22099131\"}",
+      "expect": null
+    },
+    {
+      "label": "200 with a name that is not a string",
+      "status": 200,
+      "body": "{\"found\":true,\"ban\":\"22099131\",\"name\":42}",
+      "expect": null
+    },
+    {
+      "label": "200 with an empty name",
+      "status": 200,
+      "body": "{\"found\":true,\"ban\":\"22099131\",\"name\":\"\"}",
+      "expect": null
+    },
+    {
+      "label": "200 with a whitespace-only name",
+      "status": 200,
+      "body": "{\"found\":true,\"ban\":\"22099131\",\"name\":\" \u3000\"}",
+      "expect": null
+    },
+    {
+      "label": "200 with a BMP PUA name (#10)",
+      "status": 200,
+      "body": "{\"found\":true,\"ban\":\"22099131\",\"name\":\"某某\uf585商行\"}",
+      "expect": null
+    },
+    {
+      "label": "200 with a plane-15 PUA name (#10)",
+      "status": 200,
+      "body": "{\"found\":true,\"ban\":\"22099131\",\"name\":\"台北\udba8\udffe行\"}",
+      "expect": null
+    },
+    {
+      "label": "200 with the server flag nameHasPrivateUse",
+      "status": 200,
+      "body": "{\"found\":true,\"ban\":\"22099131\",\"name\":\"某某商行\",\"nameHasPrivateUse\":true}",
+      "expect": null
+    }
+  ]
+}
